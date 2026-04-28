@@ -188,7 +188,7 @@ config.DrawWindow = function(us)
             imgui.EndChild();
         end
         if (imgui.CollapsingHeader("Enemy List")) then
-            imgui.BeginChild("EnemyListSettings", { 0, 180 }, true);
+            imgui.BeginChild("EnemyListSettings", { 0, 235 }, true);
             if (imgui.Checkbox('Enabled', { gConfig.showEnemyList })) then
                 gConfig.showEnemyList = not gConfig.showEnemyList;
                 UpdateSettings();
@@ -197,6 +197,16 @@ config.DrawWindow = function(us)
                 gConfig.showEnemyListBookends = not gConfig.showEnemyListBookends;
                 UpdateSettings();
             end
+            if (imgui.Checkbox('Debuffs on Left Side', { gConfig.enemyListDebuffsLeft })) then
+                gConfig.enemyListDebuffsLeft = not gConfig.enemyListDebuffsLeft;
+                UpdateSettings();
+            end
+            imgui.ShowHelp('Checked: debuff icons appear to the LEFT of each enemy bar. Unchecked: debuffs appear to the RIGHT (default).');
+            if (imgui.Checkbox('Stack Entries Upward', { gConfig.enemyListStackUpward })) then
+                gConfig.enemyListStackUpward = not gConfig.enemyListStackUpward;
+                UpdateSettings();
+            end
+            imgui.ShowHelp('Anchors the BOTTOM edge of the list. As enemies are added, the list grows upward instead of downward. Drag the window to set where the bottom should sit.');
             local scaleX = { gConfig.enemyListScaleX };
             if (imgui.SliderFloat('Scale X', scaleX, 0.1, 3.0, '%.1f')) then
                 gConfig.enemyListScaleX = scaleX[1];

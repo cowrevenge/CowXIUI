@@ -203,14 +203,14 @@ T{
 
     partyList2ScaleX = 0.7,
     partyList2ScaleY = 0.7,
-    partyList2FontOffset = -2,
+    partyList2FontOffset = 0,
     partyList2JobIconScale = 0.8,
     partyList2EntrySpacing = -20,
     partyList2TP = false,
 
     partyList3ScaleX = 0.7,
     partyList3ScaleY = 0.7,
-    partyList3FontOffset = -2,
+    partyList3FontOffset = 0,
     partyList3JobIconScale = 0.8,
     partyList3EntrySpacing = -20,
     partyList3TP = false,

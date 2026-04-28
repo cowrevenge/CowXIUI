@@ -3,7 +3,6 @@ local imgui = require('imgui');
 local fonts = require('fonts');
 
 local inventoryText;
-
 local inventoryTracker = {};
 
 local function UpdateTextVisibility(visible)
@@ -25,13 +24,11 @@ inventoryTracker.DrawWindow = function(settings)
         UpdateTextVisibility(false);
         return;
     end
-
     local mainJob = player:GetMainJob();
     if (player.isZoning or mainJob == 0) then
         UpdateTextVisibility(false);
         return;
     end
-
     local inventory = AshitaCore:GetMemoryManager():GetInventory();
     if (inventory == nil) then
         UpdateTextVisibility(false);
@@ -43,7 +40,6 @@ inventoryTracker.DrawWindow = function(settings)
     local text = ('%u/%u'):format(used, max);
 
     imgui.SetNextWindowSize({ -1, -1 }, ImGuiCond_Always);
-
     local windowFlags = bit.bor(
         ImGuiWindowFlags_NoDecoration,
         ImGuiWindowFlags_AlwaysAutoResize,
@@ -52,32 +48,31 @@ inventoryTracker.DrawWindow = function(settings)
         ImGuiWindowFlags_NoBackground,
         ImGuiWindowFlags_NoBringToFrontOnFocus
     );
-
     if (gConfig.lockPositions) then
         windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoMove);
     end
 
     if (imgui.Begin('InventoryTracker', true, windowFlags)) then
-        local cursorX, cursorY = imgui.GetCursorScreenPos();
+        local anchorX, anchorY = imgui.GetCursorScreenPos();
         local textSizeX, textSizeY = imgui.CalcTextSize(text);
 
-        local offsetX = settings.offsetX or 0;
-        local offsetY = settings.offsetY or 0;
-        local textPosX = cursorX + offsetX;
-        local textPosY = cursorY + offsetY;
+        -- The drag-handle region. The visible numbers are drawn by
+        -- gdifonts, which renders a few pixels to the right of where
+        -- ImGui's CalcTextSize/cursor places things, AND each glyph is
+        -- wider in gdifonts than in ImGui's bundled font. So we both
+        -- shift right and widen the rectangle to wrap the real text.
+        local fontXNudge = 0;       -- horizontal offset to gdifont start
+        local fontYNudge = 4;       -- nudge box DOWN to sit on the numbers
+        local glyphScale = 1.30;    -- wider to extend box ~half a glyph past the last digit
+        local rectX = anchorX + fontXNudge;
+        local rectY = anchorY + fontYNudge;
+        local rectW = math.floor(textSizeX * glyphScale + 0.5);
 
-        -- If right-justified, the visible text extends left from textPosX.
-        local hitboxX = textPosX;
-        if (settings.font_settings and settings.font_settings.right_justified) then
-            hitboxX = textPosX - textSizeX;
-        end
+        imgui.SetCursorScreenPos({ rectX, rectY });
+        imgui.Dummy({ rectW, textSizeY });
 
-        -- Move cursor to the actual text area and make the window occupy it.
-        imgui.SetCursorScreenPos({ hitboxX, textPosY });
-        imgui.Dummy({ textSizeX, textSizeY });
-
+        -- Visible numbers drawn by gdifonts at the same anchor.
         inventoryText:SetText(text);
-
         if (used >= max) then
             inventoryText:SetColor(MakeColor(255, 255, 0, 0));       -- red
         elseif (max > 0 and (used / max) >= 0.80) then
@@ -85,10 +80,8 @@ inventoryTracker.DrawWindow = function(settings)
         else
             inventoryText:SetColor(MakeColor(255, 255, 255, 255));   -- white
         end
-
-        inventoryText:SetPositionX(textPosX);
-        inventoryText:SetPositionY(textPosY);
-
+        inventoryText:SetPositionX(anchorX);
+        inventoryText:SetPositionY(anchorY);
         UpdateTextVisibility(true);
     end
     imgui.End();
@@ -96,11 +89,16 @@ end
 
 inventoryTracker.Initialize = function(settings)
     inventoryText = fonts.new(settings.font_settings);
+    if (inventoryText.SetRightJustified) then
+        inventoryText:SetRightJustified(false);
+    end
 end
 
 inventoryTracker.UpdateFonts = function(settings)
     inventoryText:SetFontHeight(settings.font_settings.font_height);
-    inventoryText:SetRightJustified(settings.font_settings.right_justified);
+    if (inventoryText.SetRightJustified) then
+        inventoryText:SetRightJustified(false);
+    end
 end
 
 inventoryTracker.SetHidden = function(hidden)

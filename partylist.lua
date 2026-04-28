@@ -9,6 +9,8 @@ local progressbar = require('progressbar');
 local encoding = require('gdifonts.encoding');
 local ashita_settings = require('settings');
 
+---------------------------------------------------------------------------------
+
 local fullMenuWidth = {};
 local fullMenuHeight = {};
 local buffWindowX = {};
@@ -787,6 +789,22 @@ local function DrawMember(memIdx, settings)
     local hpStartX, hpStartY = imgui.GetCursorScreenPos();
 
     if (stacked) then
+        -- Stacked layout draws all text via imgui.TextColored (see outlined() below),
+        -- which uses the default imgui font and therefore ignores the per-party font
+        -- offset we apply to memberText[*] primitives via SetFontHeight. Scale the
+        -- current window's imgui font so the offset is reflected here too, and so
+        -- imgui.CalcTextSize returns matching widths for positioning.
+        local fontOffset = gConfig.partyListFontOffset;
+        if (partyIndex == 2) then
+            fontOffset = gConfig.partyList2FontOffset;
+        elseif (partyIndex == 3) then
+            fontOffset = gConfig.partyList3FontOffset;
+        end
+        local baseFontH    = settings.hp_font_settings.font_height;
+        local stackedScale = (baseFontH > 0) and ((baseFontH + (fontOffset or 0)) / baseFontH) or 1;
+        if (stackedScale <= 0) then stackedScale = 1; end
+        imgui.SetWindowFontScale(stackedScale);
+
         local barGap         = -3;
         local hpBarDrawWidth = math.floor(hpBarWidth * 0.80);
         local mpBarDrawWidth = math.floor(hpBarDrawWidth * 0.75);
@@ -943,6 +961,14 @@ local function DrawMember(memIdx, settings)
             else
                 imgui.InvisibleButton('##target_' .. memIdx, {entryW, totalBarsH});
                 if (imgui.IsItemClicked(0) and memInfo.name ~= '') then
+                    -- Click-to-target. /target works only when the player
+                    -- is not engaged - FFXI blocks main-target changes
+                    -- to allies mid-combat. Attempts to set sub-target
+                    -- via direct memory writes or FFI-calling the game's
+                    -- SetTarget function have either crashed the client
+                    -- or caused sub-target to resync to the main target.
+                    -- Leaving this as a plain /target until we understand
+                    -- the target state machine better.
                     AshitaCore:GetChatManager():QueueCommand(1, '/target ' .. memInfo.name);
                 end
             end
@@ -1022,6 +1048,7 @@ local function DrawMember(memIdx, settings)
                 imgui.Dummy({0, math.max(-2, math.floor(settings.entrySpacing[partyIndex] * 0.125))});
             end
         end
+        imgui.SetWindowFontScale(1.0);
         return;
     end
 
@@ -1288,6 +1315,15 @@ local function DrawCurrentTarget(settings)
 
         if imgui.Begin('PartyListTargetPreview', true, wflags) then
             wX, wY = imgui.GetWindowPos();
+
+            -- Scale imgui font to respect partyListFontOffset (same rationale as stacked).
+            -- All text here is imgui.TextColored, which uses the default imgui font.
+            local _fontOffset = gConfig.partyListFontOffset or 0;
+            local _baseFontH  = settings.hp_font_settings.font_height;
+            local _fontScale  = (_baseFontH > 0) and ((_baseFontH + _fontOffset) / _baseFontH) or 1;
+            if (_fontScale <= 0) then _fontScale = 1; end
+            imgui.SetWindowFontScale(_fontScale);
+
             local titleW, _ = imgui.CalcTextSize('Target');
             imgui.SetCursorPosX(math.floor((winW - titleW) / 2));
             imgui.TextColored({0.75, 0.83, 0.90, 1.0}, 'Target');
@@ -1305,6 +1341,7 @@ local function DrawCurrentTarget(settings)
             imgui.SetCursorScreenPos({barX, barY + barHeight + 1});
             imgui.Dummy({barWidth, 1});
             wW, wH = imgui.GetWindowSize();
+            imgui.SetWindowFontScale(1.0);
         end
         imgui.PopStyleVar(3);
         imgui.End();
@@ -1494,6 +1531,14 @@ local function DrawCurrentTarget(settings)
     if imgui.Begin('PartyListTarget', true, windowFlags) then
         wX, wY = imgui.GetWindowPos();
 
+        -- Scale imgui font to respect partyListFontOffset (same rationale as stacked).
+        -- The target window draws all text via imgui.TextColored / outlined().
+        local _fontOffset = gConfig.partyListFontOffset or 0;
+        local _baseFontH  = settings.hp_font_settings.font_height;
+        local _fontScale  = (_baseFontH > 0) and ((_baseFontH + _fontOffset) / _baseFontH) or 1;
+        if (_fontScale <= 0) then _fontScale = 1; end
+        imgui.SetWindowFontScale(_fontScale);
+
         local titleW, _ = imgui.CalcTextSize('Target');
         imgui.SetCursorPosX(math.floor((winW - titleW) / 2));
         imgui.TextColored({0.75, 0.83, 0.90, 1.0}, 'Target');
@@ -1595,6 +1640,7 @@ local function DrawCurrentTarget(settings)
         end
 
         wW, wH = imgui.GetWindowSize();
+        imgui.SetWindowFontScale(1.0);
     end
 
     imgui.PopStyleVar(3);
@@ -1784,6 +1830,14 @@ local function DrawCastCost(settings)
     if imgui.Begin('HXUICastCost', true, windowFlags) then
         wX, wY = imgui.GetWindowPos();
 
+        -- Scale imgui font to respect partyListFontOffset (same rationale as stacked).
+        -- Cast cost panel draws all text via imgui.TextColored.
+        local _fontOffset = gConfig.partyListFontOffset or 0;
+        local _baseFontH  = settings.hp_font_settings.font_height;
+        local _fontScale  = (_baseFontH > 0) and ((_baseFontH + _fontOffset) / _baseFontH) or 1;
+        if (_fontScale <= 0) then _fontScale = 1; end
+        imgui.SetWindowFontScale(_fontScale);
+
         -- Line 1: name (left) + optional right-aligned MP/TP
         imgui.TextColored({ 1, 1, 1, 1 }, info.name);
         if firstLineRight ~= nil then
@@ -1806,6 +1860,7 @@ local function DrawCastCost(settings)
 
         wW, wH = imgui.GetWindowSize();
         castCostPrevH = wH;
+        imgui.SetWindowFontScale(1.0);
     end
     imgui.End();
 

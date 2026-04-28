@@ -11,6 +11,15 @@ local bgRadius = 3;
 local allClaimedTargets = {};
 local enemylist = {};
 
+-- State for "Stack Entries Upward" mode (bottom-anchored window). ImGui
+-- only lets us pin the top-left corner, so we track the desired bottom Y
+-- ourselves and each frame compute top = anchorBottomY - lastHeight via
+-- SetNextWindowPos. While the user is dragging we skip the override and
+-- recapture the anchor from the new position so dragging still works.
+local stackUpAnchorX = nil;
+local stackUpAnchorBottomY = nil;
+local stackUpLastHeight = 0;
+
 local function GetIsValidMob(mobIdx)
 	-- Check if we are valid, are above 0 hp, and are rendered
 
@@ -35,6 +44,17 @@ end
 enemylist.DrawWindow = function(settings)
 
 	imgui.SetNextWindowSize({ settings.barWidth, -1, }, ImGuiCond_Always);
+
+	-- Bottom-anchor: pin the window's bottom edge by overriding its top
+	-- position from our stored anchor and last frame's height. We skip the
+	-- override while a drag is in progress so the user can still reposition
+	-- the window; the new anchor is recaptured below inside Begin.
+	local stackUp = gConfig.enemyListStackUpward;
+	local userIsDragging = imgui.IsMouseDragging(0);
+	if (stackUp and stackUpAnchorBottomY ~= nil and not userIsDragging) then
+		imgui.SetNextWindowPos({stackUpAnchorX, stackUpAnchorBottomY - stackUpLastHeight}, ImGuiCond_Always);
+	end
+
 	-- Draw the main target window
 	local windowFlags = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoBringToFrontOnFocus);
 	if (gConfig.lockPositions) then
@@ -57,10 +77,33 @@ enemylist.DrawWindow = function(settings)
 			end
 		end
 		
-		local numTargets = 0;
+		-- First pass: walk allClaimedTargets in pairs() order, collecting
+		-- keys that should be rendered and dropping any that are no longer
+		-- valid. Splitting the cleanup from the render lets us iterate the
+		-- render pass forward or in reverse below.
+		local renderOrder = {};
 		for k,v in pairs(allClaimedTargets) do
 			local ent = GetEntity(k);
-            if (v ~= nil and ent ~= nil and GetIsValidMob(k) and ent.HPPercent > 0 and ent.Name ~= nil) then
+			if (v ~= nil and ent ~= nil and GetIsValidMob(k) and ent.HPPercent > 0 and ent.Name ~= nil) then
+				table.insert(renderOrder, k);
+			else
+				allClaimedTargets[k] = nil;
+			end
+		end
+
+		-- Render pass: forward normally, or reversed when stacking upward
+		-- so the first (oldest) entry sits at the bottom of the list and
+		-- newer entries appear above it.
+		local startIdx, endIdx, step = 1, #renderOrder, 1;
+		if (stackUp) then
+			startIdx, endIdx, step = #renderOrder, 1, -1;
+		end
+
+		local numTargets = 0;
+		for i = startIdx, endIdx, step do
+			local k = renderOrder[i];
+			local ent = GetEntity(k);
+			do
 				-- Obtain and prepare target information..
 				local targetNameText = ent.Name;
 				-- if (targetNameText ~= nil) then
@@ -99,7 +142,20 @@ enemylist.DrawWindow = function(settings)
 					-- Draw buffs and debuffs
 					local buffIds = debuffHandler.GetActiveDebuffs(AshitaCore:GetMemoryManager():GetEntity():GetServerId(k));
 					if (buffIds ~= nil and #buffIds > 0) then
-						imgui.SetNextWindowPos({winStartX + settings.barWidth + settings.debuffOffsetX, winY + settings.debuffOffsetY});
+						local debuffX;
+						if (gConfig.enemyListDebuffsLeft) then
+							-- Estimate the debuff window width so we can pin its right
+							-- edge to the left of the bar. Icons use ItemSpacing {1,1}
+							-- (set below) and the window keeps its default WindowPadding
+							-- (~8px each side ⇒ +16). Close enough; users can fine-tune
+							-- with debuffOffsetX.
+							local iconCount = math.min(#buffIds, settings.maxIcons);
+							local debuffWidth = iconCount * settings.iconSize + math.max(0, iconCount - 1) + 16;
+							debuffX = winStartX - debuffWidth - settings.debuffOffsetX;
+						else
+							debuffX = winStartX + settings.barWidth + settings.debuffOffsetX;
+						end
+						imgui.SetNextWindowPos({debuffX, winY + settings.debuffOffsetY});
 						if (imgui.Begin('EnemyDebuffs'..k, true, bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoSavedSettings))) then
 							imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, {1, 1});
 							DrawStatusIcons(buffIds, settings.iconSize, settings.maxIcons, 1);
@@ -123,9 +179,23 @@ enemylist.DrawWindow = function(settings)
 						break;
 					end
 				-- end
-			else
-				allClaimedTargets[k] = nil;
 			end
+		end
+
+		-- Capture geometry for next frame's bottom-anchor calculation. On
+		-- first activation (or while the user is actively dragging this
+		-- window) we update the anchor from the live position; otherwise
+		-- we just remember the height so the override can pin the bottom.
+		if (stackUp) then
+			local px, py = imgui.GetWindowPos();
+			local _, ph = imgui.GetWindowSize();
+			if (stackUpAnchorBottomY == nil or (userIsDragging and imgui.IsWindowHovered())) then
+				stackUpAnchorX = px;
+				stackUpAnchorBottomY = py + ph;
+			end
+			stackUpLastHeight = ph;
+		else
+			stackUpAnchorBottomY = nil;
 		end
 	end
 	imgui.End();
