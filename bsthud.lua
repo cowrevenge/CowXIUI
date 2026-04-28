@@ -726,13 +726,13 @@ local function check_job_gate()
         local mj = JOB_NAMES[state.main_job] or '?'
         local sj = JOB_NAMES[state.sub_job] or '?'
         if state.paused_for_job then
-            log(('Main or Sub is not a Pet Job (%s/%s) - UI Paused (not drawing)'):format(mj, sj))
+            vlog(('Main or Sub is not a Pet Job (%s/%s) - UI Paused (not drawing)'):format(mj, sj))
             -- Drop any pet state we may have been tracking
             if state.pet_active then
                 make_invisible()
             end
         else
-            log(('Pet job detected (%s/%s) - UI Active'):format(mj, sj))
+            vlog(('Pet job detected (%s/%s) - UI Active'):format(mj, sj))
         end
     end
 end
