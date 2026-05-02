@@ -785,11 +785,14 @@ local function find_sic_slot()
 end
 
 -- Sic recast remaining (seconds).
+-- Ashita's GetAbilityTimer returns ticks at 1/60s (game-frame units), not
+-- seconds. We divide by 60 here so every caller works in real seconds.
+local RECAST_TICKS_PER_SEC = 60
 local function get_sic_recast()
     local slot, rm = find_sic_slot()
     if not slot then return 0 end
     local ok, t = pcall(function() return rm:GetAbilityTimer(slot) end)
-    if ok and t then return t end
+    if ok and t then return t / RECAST_TICKS_PER_SEC end
     return 0
 end
 
@@ -797,6 +800,7 @@ end
 -- and returns its remaining seconds, or nil if the ability isn't in the recast
 -- table (usually means the player doesn't know it yet). Same slot-scan pattern
 -- as find_sic_slot. Returns 0 when the ability is known but off cooldown.
+-- Like get_sic_recast, converts Ashita's 1/60s ticks to real seconds.
 local function get_ability_recast_by_id(timer_id)
     if not timer_id then return nil end
     local rm = AshitaCore:GetMemoryManager():GetRecast()
@@ -805,7 +809,7 @@ local function get_ability_recast_by_id(timer_id)
         local ok, id = pcall(function() return rm:GetAbilityTimerId(i) end)
         if ok and id == timer_id then
             local ok2, t = pcall(function() return rm:GetAbilityTimer(i) end)
-            if ok2 then return t or 0 end
+            if ok2 then return (t or 0) / RECAST_TICKS_PER_SEC end
             return 0
         end
     end
@@ -875,17 +879,26 @@ local function get_sic_modifier()
     end)
     if got and type(mod) == 'number' then
         sic_modifier_api_ok = true
-        return mod
+        return mod / RECAST_TICKS_PER_SEC  -- modifier is in the same 1/60s ticks
     end
     sic_modifier_api_ok = false
     return nil
 end
 
+-- HorizonXI uses a slower Ready/Sic cycle than retail:
+--   retail: 30s per charge, 90s for a full 3-charge cycle
+--   HzXI:   45s per charge, 135s for a full 3-charge cycle
+-- (per https://horizonffxi.wiki/Category:Familiars — "On Horizon these
+-- regenerate at 1 per 45 seconds"). Since this addon's jug-pet table and
+-- comments are already HzXI-specific, the cycle constants below are too.
+local CHARGE_CYCLE_BASE  = 135  -- seconds for a full 3-charge cycle (no reductions)
+local CHARGE_PER_BASE    = 45   -- seconds per charge (no reductions)
+
 -- Returns per-charge time in seconds (may be fractional). Three sources, in
 -- preference order:
 --   1. user override via /bsthud chargebase <N>
 --   2. the recast block's Modifier (preferred; one source of truth)
---   3. legacy: scan gear + merits + JP and subtract from the 30s base
+--   3. legacy: scan gear + merits + JP and subtract from the per-charge base
 local function compute_chargebase()
     if config.charge_base_override and config.charge_base_override > 0 then
         return config.charge_base_override
@@ -893,26 +906,61 @@ local function compute_chargebase()
     local mod = get_sic_modifier()
     if mod ~= nil then
         -- Modifier is the reduction (in seconds) applied to the FULL 3-charge
-        -- cycle (90s base). Per-charge = (90 + mod) / 3. Modifier is negative
-        -- for reductions, e.g. -30 → 60s total → 20s per charge.
-        local cb = (90 + mod) / 3
+        -- cycle. Per-charge = (CYCLE + mod) / 3. Modifier is negative for
+        -- reductions, e.g. on HzXI -30 → 105s total → 35s per charge.
+        local cb = (CHARGE_CYCLE_BASE + mod) / 3
         if cb < 1 then cb = 1 end
         return cb
     end
-    return math.max(1, 30 - state.merits - state.jobpoints - state.equip_reduction)
+    return math.max(1, CHARGE_PER_BASE - state.merits - state.jobpoints - state.equip_reduction)
 end
 
 local function update_charges()
+    -- Debug: log on every entry, BEFORE any early-bail gates, so we can tell
+    -- whether the function is being called at all and which gate (if any)
+    -- it's stopping at. Throttled to ~2s. Enable with /bsthud debug.
+    local _dbg = config.debug_mode
+    if _dbg then
+        state._charge_dbg_t = (state._charge_dbg_t or 0) + 0.1
+        if state._charge_dbg_t < 2.0 then _dbg = false
+        else state._charge_dbg_t = 0 end
+    end
+
     local player = get_player_memory()
-    if player == nil then return end
-    if player:GetMainJob() ~= 9 then return end  -- 9 = BST
+    if player == nil then
+        if _dbg then svlog('charges: BAIL - get_player_memory() returned nil') end
+        return
+    end
+    local mj = player:GetMainJob()
+    if mj ~= 9 then
+        if _dbg then svlog(('charges: BAIL - GetMainJob()=%s (expected 9 for BST)'):format(tostring(mj))) end
+        return
+    end
     local duration = get_sic_recast()
-    local cb = compute_chargebase()
+    local mod      = get_sic_modifier()
+    local cb       = compute_chargebase()
     local total = cb * 3
     state.charges = math.floor((total - duration) / cb)
     if state.charges < 0 then state.charges = 0 end
     if state.charges > 3 then state.charges = 3 end
-    state.next_ready_recast = math.floor(math.fmod(duration, cb))
+    -- Seconds until charge count ticks up by one (NOT duration mod cb — that
+    -- formula oscillates confusingly at each charge boundary, e.g. for cb=45
+    -- it counts ...3,2,1,0,44,43... as the recast crosses a multiple of cb).
+    -- The clock has (3 - charges) charges left to fill; the next gain happens
+    -- when it reaches (2 - charges) * cb seconds remaining.
+    if state.charges >= 3 then
+        state.next_ready_recast = 0
+    else
+        local until_next = duration - (2 - state.charges) * cb
+        if until_next < 0 then until_next = 0 end
+        state.next_ready_recast = math.floor(until_next)
+    end
+
+    if _dbg then
+        svlog(('charges: raw_duration=%s mod=%s cb=%s total=%s -> charges=%d next=%ds')
+            :format(tostring(duration), tostring(mod), tostring(cb), tostring(total),
+                    state.charges, state.next_ready_recast))
+    end
 end
 
 -- Try to read Sic Recast merit level. Ashita exposes merits differently
@@ -1147,9 +1195,24 @@ end
 local function calculate_charm_expiry(mob_level)
     local player = AshitaCore:GetMemoryManager():GetPlayer()
     if player == nil then return nil end
-    local ok_lvl, player_lvl = pcall(function() return player:GetMainJobLevel() end)
-    local ok_chr, chr        = pcall(function() return player:GetStat(6) end)
-    if not ok_lvl or not ok_chr or not player_lvl or not chr then return nil end
+    -- Charm duration depends on the player's BST level — main level if BST is
+    -- main, otherwise sub level (e.g. WAR/BST charms with their /BST level).
+    -- Falls back to main-level if the sub-level API isn't exposed on this
+    -- Ashita build, which gives a too-high but graceful answer.
+    local player_lvl
+    if state.main_job == 9 then
+        local ok_lvl, lvl = pcall(function() return player:GetMainJobLevel() end)
+        if ok_lvl then player_lvl = lvl end
+    elseif state.sub_job == 9 then
+        local ok_lvl, lvl = pcall(function() return player:GetSubJobLevel() end)
+        if ok_lvl then player_lvl = lvl end
+        if not player_lvl then
+            local ok_main, main_lvl = pcall(function() return player:GetMainJobLevel() end)
+            if ok_main and main_lvl then player_lvl = math.floor(main_lvl / 2) end
+        end
+    end
+    local ok_chr, chr = pcall(function() return player:GetStat(6) end)
+    if not player_lvl or not ok_chr or not chr then return nil end
 
     local diff = player_lvl - (mob_level or 0)
     if diff < -6 then diff = -6 elseif diff > 9 then diff = 9 end
@@ -1198,8 +1261,8 @@ track_pet_summon = function(pet_name)
         state.pet_origin      = 'jug'
         state.pet_expire_time = state.pet_summon_time + (jug.duration * 60)
         state.charm_expire_time = nil
-    elseif state.main_job == 9 then
-        -- BST main + not a jug + not an avatar name = charmed mob.
+    elseif state.main_job == 9 or state.sub_job == 9 then
+        -- BST main or sub + not a jug + not an avatar name = charmed mob.
         -- charm_expire_time is populated later by the /check packet handler.
         state.pet_origin      = 'charm'
         state.pet_expire_time = nil
@@ -1357,12 +1420,15 @@ local function render_hud()
                 imgui.PopStyleColor()
             end
 
-            -- Charges line (BST only). Compact format so "Next: Xs" doesn't
-            -- get clipped when the auto-resize uses the pet-name line's width.
-            if state.main_job == 9 then
-                imgui.Text(('Charges: %d | Next: %ds'):format(state.charges, state.next_ready_recast))
+            -- Charges line (BST main only — /BST sub can't summon jugs and
+            -- doesn't use Ready, so the 3-charge counter is meaningless for
+            -- them). The Stay/Charm timing below applies to BST main OR sub.
+            if state.main_job == 9 or state.sub_job == 9 then
+                if state.main_job == 9 then
+                    imgui.Text(('Charges: %d | Next: %ds'):format(state.charges, state.next_ready_recast))
+                end
 
-                -- Pet duration line (BST only). XIUI-style:
+                -- Pet duration line. XIUI-style:
                 --   jug   -> remaining time from summon + jug-table duration
                 --   charm -> remaining time from /check-derived expiry,
                 --            or elapsed time as a fallback if /check was missed
