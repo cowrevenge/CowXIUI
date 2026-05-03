@@ -362,6 +362,13 @@ local CHARM_STATE_NONE            = 0
 local CHARM_STATE_SENDING_PACKET  = 1
 local CHARM_STATE_CHECK_PACKET    = 2
 local CHARM_ACTION_ID             = 0x34   -- ability id 52 = Charm
+-- Call Beast (and its higher-tier sibling Bestial Loyalty) are the BST job
+-- abilities that consume a jug and spawn a fresh pet. Detecting either lets
+-- us reset the persisted Stay timer so a fresh summon always starts at the
+-- jug's full duration, even when the previous pet of the same type died or
+-- was released within its window.
+local CALL_BEAST_ACTION_ID        = 0x1E   -- ability id 30 = Call Beast
+local BESTIAL_LOYALTY_ACTION_ID   = 0x1F   -- ability id 31 = Bestial Loyalty
 local PKT_OUT_ACTION              = 0x01A
 local PKT_OUT_CHECK               = 0x0DD
 local PKT_IN_CHECK                = 0x029
@@ -1192,6 +1199,86 @@ local function get_charm_equip_value()
     return total
 end
 
+-------------------------------------------------------------------------------
+-- Jug-pet persistence (survives /reload, logout, and brief disconnects)
+--
+-- Problem this solves: track_pet_summon resets pet_summon_time to os.time()
+-- whenever it sees a "new" pet name. After a d/c that's reconnected fast
+-- enough that the jug pet survives, the addon sees the name fresh and
+-- restarts the Stay timer at the full 60 minutes — way more time than the
+-- player actually has left.
+--
+-- Approach: every time we set a jug expire, write {name, expire_time} to a
+-- per-character file. On the next jug classification, if the saved file's
+-- pet name matches and its expire is still in the future, restore the saved
+-- expire instead of computing a fresh one.
+--
+-- Per-character because two characters on the same install would otherwise
+-- step on each other's saved state. Server-id is unique and stable.
+--
+-- Charm pets are intentionally NOT persisted — they always despawn on
+-- disconnect, so there's nothing to restore.
+-------------------------------------------------------------------------------
+
+local function jug_persist_path()
+    local sid = nil
+    pcall(function() sid = get_player_server_id() end)
+    if sid == nil or sid == 0 then return nil end
+    -- Stash next to the addon, not inside the read-only skills tree. Ashita's
+    -- addon working directory is fine; using a distinctive name avoids clashes.
+    return ('bsthud_jug_%d.dat'):format(sid)
+end
+
+local function save_jug_state(name, expire_time)
+    local path = jug_persist_path()
+    if not path then return end
+    local f = io.open(path, 'w')
+    if not f then return end
+    -- Tiny format: name on line 1, expire_time on line 2. Avoids pulling in
+    -- a JSON dep just for two fields.
+    f:write(tostring(name), '\n', tostring(math.floor(expire_time)), '\n')
+    f:close()
+end
+
+local function load_jug_state()
+    local path = jug_persist_path()
+    if not path then return nil end
+    local f = io.open(path, 'r')
+    if not f then return nil end
+    local name = f:read('*l')
+    local exp_s = f:read('*l')
+    f:close()
+    if not name or not exp_s then return nil end
+    local exp = tonumber(exp_s)
+    if not exp then return nil end
+    return name, exp
+end
+
+local function clear_jug_state()
+    local path = jug_persist_path()
+    if not path then
+        log('clear_jug_state: no path (no server id?), skipping')
+        return
+    end
+    local ok, err = os.remove(path)
+    if ok then
+        log('clear_jug_state: deleted ' .. path)
+        return
+    end
+    -- os.remove failed — could be the file doesn't exist (fine) or a real
+    -- error (file locked, permission denied, sync tool reverting writes).
+    -- Either way, fall back to writing a clearly-expired record so the next
+    -- load_jug_state() check (saved_exp > os.time()) refuses to restore it.
+    local f = io.open(path, 'w')
+    if f then
+        f:write('__cleared__\n0\n')
+        f:close()
+        log('clear_jug_state: overwrote with expired sentinel (' .. tostring(err) .. ')')
+    else
+        log('clear_jug_state: FAILED to remove or overwrite ' .. path .. ' (' .. tostring(err) .. ')')
+    end
+end
+
 local function calculate_charm_expiry(mob_level)
     local player = AshitaCore:GetMemoryManager():GetPlayer()
     if player == nil then return nil end
@@ -1240,6 +1327,12 @@ track_pet_summon = function(pet_name)
         state.pet_expire_time      = nil
         state.pet_origin           = nil
         state.last_tracked_pet_name = nil
+        -- NOTE: do NOT clear_jug_state() here. This branch fires whenever the
+        -- client's pet entity vanishes — which includes a real logout, when
+        -- the server keeps the jug alive and hands it back at login. Clearing
+        -- here meant the saved expire was deleted right before we needed it.
+        -- The load-side check (saved_exp > os.time()) already prevents
+        -- restoring a record older than the jug's natural lifetime.
         -- Preserve charm_* fields if a /check response is in flight
         if state.charm_state == CHARM_STATE_NONE then
             state.charm_expire_time = nil
@@ -1259,7 +1352,21 @@ track_pet_summon = function(pet_name)
     local jug = JUG_PET_LOOKUP[pet_name]
     if jug then
         state.pet_origin      = 'jug'
-        state.pet_expire_time = state.pet_summon_time + (jug.duration * 60)
+        -- Try to restore from a prior session (handles d/c → reconnect with
+        -- the pet still alive). Restore only if the saved name matches AND
+        -- the saved expire is still in the future. A fresh /jugpet of the
+        -- same type after the saved one expired naturally falls through to
+        -- the compute-fresh branch.
+        local saved_name, saved_exp = load_jug_state()
+        if saved_name == pet_name and saved_exp and saved_exp > os.time() then
+            state.pet_expire_time = saved_exp
+            -- Back-derive a plausible summon time so any UI that uses it
+            -- (e.g. fmt_mmss elapsed) shows continuity rather than "0s ago".
+            state.pet_summon_time = saved_exp - (jug.duration * 60)
+        else
+            state.pet_expire_time = state.pet_summon_time + (jug.duration * 60)
+            save_jug_state(pet_name, state.pet_expire_time)
+        end
         state.charm_expire_time = nil
     elseif state.main_job == 9 or state.sub_job == 9 then
         -- BST main or sub + not a jug + not an avatar name = charmed mob.
@@ -2135,11 +2242,37 @@ function bsthud.HandleOutgoingPacket(e)
         return
     end
 
+    -- Call Beast / Bestial Loyalty: a fresh summon is happening. Drop any
+    -- saved jug expire so when the new pet entity arrives and runs through
+    -- track_pet_summon, the load-from-disk path returns nothing and we fall
+    -- through to compute-fresh-then-save with the jug's full duration.
+    -- Harmless if the cast fails (no jug equipped, etc.) — we just have no
+    -- saved state, and there's no pet to restore for either.
+    if param == CALL_BEAST_ACTION_ID or param == BESTIAL_LOYALTY_ACTION_ID then
+        vlog('Call Beast / Bestial Loyalty detected, clearing saved jug timer')
+        clear_jug_state()
+        -- Don't return; let the resource-manager naming pass below run too in
+        -- case any other code paths key off the resolved ability name.
+    end
+
     local ability = resMgr and resMgr:GetAbilityById(param)
     if ability == nil then return end
     local name = (ability.Name and ability.Name[1]) or ability.En or ''
     if name == 'Call Beast' or name == 'Bestial Loyalty' then
-        vlog('BST summon detected: ' .. name)
+        log('BST summon detected: ' .. name)  -- temporary: was vlog
+        -- Fresh summon → drop any saved jug expire so the new pet starts at
+        -- full duration. (Belt & suspenders with the ID check above; this
+        -- name match is the canonical detection point used by the rest of
+        -- the addon and works even if the ability ID isn't what we think.)
+        clear_jug_state()
+        -- Also reset the dedup guard. track_pet_summon early-returns if the
+        -- new pet's name matches state.last_tracked_pet_name, which would
+        -- otherwise skip reclassification when a fresh Tiger Familiar
+        -- replaces a previous Tiger Familiar — leaving the OLD expire time
+        -- intact in state.pet_expire_time. Clearing it here forces the next
+        -- entity-table sweep to re-enter the jug branch and recompute.
+        state.last_tracked_pet_name = nil
+        state.pet_expire_time       = nil
         make_invisible()
         state.scan_timer = 1.9
     elseif name == 'Release' then
