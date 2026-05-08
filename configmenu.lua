@@ -624,7 +624,7 @@ config.DrawWindow = function(us)
             imgui.EndChild();
         end
         if (imgui.CollapsingHeader("Inventory Tracker")) then
-            imgui.BeginChild("InventoryTrackerSettings", { 0, 210 }, true);
+            imgui.BeginChild("InventoryTrackerSettings", { 0, 320 }, true);
             if (imgui.Checkbox('Enabled', { gConfig.showInventoryTracker })) then
                 gConfig.showInventoryTracker = not gConfig.showInventoryTracker;
                 UpdateSettings();
@@ -632,6 +632,45 @@ config.DrawWindow = function(us)
             if (imgui.Checkbox('Show Count', { gConfig.inventoryShowCount })) then
                 gConfig.inventoryShowCount = not gConfig.inventoryShowCount;
                 UpdateSettings();
+            end
+            if (imgui.Checkbox('Show Dots', { gConfig.showInventoryDots })) then
+                gConfig.showInventoryDots = not gConfig.showInventoryDots;
+                UpdateSettings();
+            end
+            if (gConfig.showInventoryDots) then
+                if (imgui.Checkbox('Anchored Text', { gConfig.inventoryAnchoredText ~= false })) then
+                    -- Default (nil) is treated as on; first toggle turns it off.
+                    if (gConfig.inventoryAnchoredText == false) then
+                        gConfig.inventoryAnchoredText = true;
+                    else
+                        gConfig.inventoryAnchoredText = false;
+                    end
+                    UpdateSettings();
+                end
+                imgui.ShowHelp('Attach the count to the dot grid (use Text Position + New Line). Uncheck to detach into a separate window you can position with shift+drag.');
+
+                if (gConfig.inventoryAnchoredText ~= false) then
+                    local inventoryTextPositions = { 'Top Right', 'Bottom Right', 'Top Left', 'Bottom Left' };
+                    local currentPos = gConfig.inventoryTextPosition or 'Top Right';
+                    if (imgui.BeginCombo('Text Position', currentPos)) then
+                        for i = 1, #inventoryTextPositions, 1 do
+                            local is_selected = (inventoryTextPositions[i] == currentPos);
+                            if (imgui.Selectable(inventoryTextPositions[i], is_selected) and inventoryTextPositions[i] ~= currentPos) then
+                                gConfig.inventoryTextPosition = inventoryTextPositions[i];
+                                UpdateSettings();
+                            end
+                            if (is_selected) then
+                                imgui.SetItemDefaultFocus();
+                            end
+                        end
+                        imgui.EndCombo();
+                    end
+                    if (imgui.Checkbox('New Line', { gConfig.inventoryTextNewLine })) then
+                        gConfig.inventoryTextNewLine = not gConfig.inventoryTextNewLine;
+                        UpdateSettings();
+                    end
+                    imgui.ShowHelp('Place the count on its own line above/below the grid (Top/Bottom controls side, Right/Left controls justification) instead of beside the grid.');
+                end
             end
             local columnCount = { gConfig.inventoryTrackerColumnCount };
             if (imgui.SliderInt('Columns', columnCount, 1, 80)) then

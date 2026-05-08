@@ -2022,7 +2022,11 @@ partyList.DrawPartyWindow = function(settings, party, partyIndex)
     if not isModern then
         windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoBackground);
     end
-    if (gConfig.lockPositions) then
+    -- Window is draggable only while Shift is held (and only if lockPositions is off).
+    -- Per-row code at line ~959 already swaps InvisibleButton -> Dummy under Shift so the
+    -- click falls through to the window; this gates the window itself the same way so
+    -- title/padding/gap regions can't be grabbed without Shift either.
+    if (gConfig.lockPositions or not imgui.GetIO().KeyShift) then
         windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoMove);
     end
 
