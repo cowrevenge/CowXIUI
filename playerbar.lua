@@ -12,6 +12,39 @@ local resetPosNextFrame = false;
 
 local playerbar = {};
 
+-- Formats an HP/MP value according to gConfig display mode.
+-- Modes (match XIUI labels):
+--   'Number Only'      -> "1234"
+--   'Percent Only'     -> "100%"
+--   'Number (Percent)' -> "1234 (100%)"
+--   'Percent (Number)' -> "100% (1234)"
+--   'Current/Max'      -> "1234/1500"
+-- Anything unset/unrecognized falls through to 'Number Only'. If maxValue is
+-- not a usable positive number (e.g. 0 or NaN, which can happen with
+-- back-computed maxes from HP/HPP) we also fall back to plain Number Only so
+-- the UI never shows "0/0", division-garbage, or NaN.
+local function FormatHpMp(value, maxValue, mode)
+    value    = value    or 0;
+    maxValue = maxValue or 0;
+    local maxOk = (maxValue == maxValue) and (maxValue > 0);  -- NaN-safe
+
+    if (not maxOk or mode == nil or mode == 'Number Only') then
+        return tostring(value);
+    end
+
+    local pct = math.floor((value / maxValue) * 100 + 0.5);
+    if (mode == 'Percent Only') then
+        return string.format('%d%%', pct);
+    elseif (mode == 'Number (Percent)') then
+        return string.format('%d (%d%%)', value, pct);
+    elseif (mode == 'Percent (Number)') then
+        return string.format('%d%% (%d)', pct, value);
+    elseif (mode == 'Current/Max') then
+        return string.format('%d/%d', value, maxValue);
+    end
+    return tostring(value);
+end
+
 local _HXUI_DEV_DEBUG_INTERPOLATION = false;
 local _HXUI_DEV_DEBUG_INTERPOLATION_DELAY, _HXUI_DEV_DEBUG_INTERPOLATION_NEXT_TIME;
 
@@ -200,6 +233,16 @@ playerbar.DrawWindow = function(settings)
 
 			local tpOverlayGradient = {'#0078CC', '#0078CC'};
 
+			-- TP overlay pulse — toggleable via gConfig.playerBarTpFlashEnabled.
+			-- nil/true (default) preserves the legacy always-pulse behavior.
+			local tpPulseSpec;
+			if (gConfig.playerBarTpFlashEnabled ~= false) then
+				tpPulseSpec = {
+					'#2fa9ff', -- overlay pulse color
+					1          -- overlay pulse seconds
+				};
+			end
+
 			tpOverlay = {
 				{
 					1, -- overlay percent
@@ -207,10 +250,7 @@ playerbar.DrawWindow = function(settings)
 				},
 				math.ceil(settings.barHeight * 2/7), -- overlay height
 				1, -- overlay vertical padding
-				{
-					'#2fa9ff', -- overlay pulse color
-					1 -- overlay pulse seconds
-				}
+				tpPulseSpec  -- nil when flash is disabled
 			};
 		else
 			mainPercent = SelfTP / 1000;
@@ -225,7 +265,7 @@ playerbar.DrawWindow = function(settings)
 		-- Update our HP Text
 		hpText:SetPositionX(hpLocX - settings.barSpacing - settings.barHeight / 2);
 		hpText:SetPositionY(hpLocY + settings.barHeight + settings.textYOffset);
-		hpText:SetText(tostring(SelfHP));
+		hpText:SetText(FormatHpMp(SelfHP, SelfHPMax, gConfig.playerBarHpDisplayMode));
 		hpText:SetColor(hpNameColor);
 		
 		hpText:SetVisible(true);
@@ -234,7 +274,7 @@ playerbar.DrawWindow = function(settings)
 			-- Update our MP Text
 			mpText:SetPositionX(mpLocX - settings.barSpacing - settings.barHeight / 2);
 			mpText:SetPositionY(mpLocY + settings.barHeight + settings.textYOffset);
-			mpText:SetText(tostring(SelfMP));
+			mpText:SetText(FormatHpMp(SelfMP, SelfMPMax, gConfig.playerBarMpDisplayMode));
 			mpText:SetColor(gAdjustedSettings.mpColor);
 		end
 

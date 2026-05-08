@@ -106,7 +106,7 @@ config.DrawWindow = function(us)
             imgui.EndChild();
         end
         if (imgui.CollapsingHeader("Player Bar")) then
-            imgui.BeginChild("PlayerBarSettings", { 0, 210 }, true);
+            imgui.BeginChild("PlayerBarSettings", { 0, 320 }, true);
             if (imgui.Checkbox('Enabled', { gConfig.showPlayerBar })) then
                 gConfig.showPlayerBar = not gConfig.showPlayerBar;
                 UpdateSettings();
@@ -124,6 +124,50 @@ config.DrawWindow = function(us)
                 UpdateSettings();
             end
             imgui.ShowHelp('Always display the MP Bar even if your current jobs cannot cast spells.'); 
+            if (imgui.Checkbox('TP Bar Flash Effects', { gConfig.playerBarTpFlashEnabled ~= false })) then
+                if (gConfig.playerBarTpFlashEnabled == false) then
+                    gConfig.playerBarTpFlashEnabled = true;
+                else
+                    gConfig.playerBarTpFlashEnabled = false;
+                end
+                UpdateSettings();
+            end
+            imgui.ShowHelp('Pulse effect on the TP overlay when TP reaches 1000+. On by default.');
+
+            -- HP/MP display modes (XIUI-compatible labels).
+            local hpMpDisplayModes = { 'Number Only', 'Percent Only', 'Number (Percent)', 'Percent (Number)', 'Current/Max' };
+            local hpDisplayMode = gConfig.playerBarHpDisplayMode or 'Number Only';
+            if (imgui.BeginCombo('HP Display', hpDisplayMode)) then
+                for i = 1, #hpMpDisplayModes, 1 do
+                    local is_selected = (hpMpDisplayModes[i] == hpDisplayMode);
+                    if (imgui.Selectable(hpMpDisplayModes[i], is_selected) and hpMpDisplayModes[i] ~= hpDisplayMode) then
+                        gConfig.playerBarHpDisplayMode = hpMpDisplayModes[i];
+                        UpdateSettings();
+                    end
+                    if (is_selected) then
+                        imgui.SetItemDefaultFocus();
+                    end
+                end
+                imgui.EndCombo();
+            end
+            imgui.ShowHelp('How HP is displayed: 1234 / 100% / 1234 (100%) / 100% (1234) / 1234/1500.');
+
+            local mpDisplayMode = gConfig.playerBarMpDisplayMode or 'Number Only';
+            if (imgui.BeginCombo('MP Display', mpDisplayMode)) then
+                for i = 1, #hpMpDisplayModes, 1 do
+                    local is_selected = (hpMpDisplayModes[i] == mpDisplayMode);
+                    if (imgui.Selectable(hpMpDisplayModes[i], is_selected) and hpMpDisplayModes[i] ~= mpDisplayMode) then
+                        gConfig.playerBarMpDisplayMode = hpMpDisplayModes[i];
+                        UpdateSettings();
+                    end
+                    if (is_selected) then
+                        imgui.SetItemDefaultFocus();
+                    end
+                end
+                imgui.EndCombo();
+            end
+            imgui.ShowHelp('How MP is displayed: 1234 / 100% / 1234 (100%) / 100% (1234) / 750/1000.');
+
             local scaleX = { gConfig.playerBarScaleX };
             if (imgui.SliderFloat('Scale X', scaleX, 0.1, 3.0, '%.1f')) then
                 gConfig.playerBarScaleX = scaleX[1];
@@ -230,7 +274,7 @@ config.DrawWindow = function(us)
             imgui.EndChild();
         end
         if (imgui.CollapsingHeader("Party List")) then
-            imgui.BeginChild("PartyListSettings", { 0, 525 }, true);
+            imgui.BeginChild("PartyListSettings", { 0, 585 }, true);
             if (imgui.Checkbox('Enabled', { gConfig.showPartyList })) then
                 gConfig.showPartyList = not gConfig.showPartyList;
                 UpdateSettings();
@@ -287,6 +331,43 @@ config.DrawWindow = function(us)
             if (imgui.Checkbox('Hide During Events', { gConfig.partyListHideDuringEvents })) then
                 gConfig.partyListHideDuringEvents = not gConfig.partyListHideDuringEvents;
                 UpdateSettings();
+            end
+
+            -- HP/MP display modes per row (separate from the player bar's so people
+            -- can keep party rows compact while showing more on their own bar).
+            do
+                local partyHpMpDisplayModes = { 'Number Only', 'Percent Only', 'Number (Percent)', 'Percent (Number)', 'Current/Max' };
+                local hpMode = gConfig.partyListHpDisplayMode or 'Number Only';
+                if (imgui.BeginCombo('HP Display##partyList', hpMode)) then
+                    for i = 1, #partyHpMpDisplayModes, 1 do
+                        local is_selected = (partyHpMpDisplayModes[i] == hpMode);
+                        if (imgui.Selectable(partyHpMpDisplayModes[i], is_selected) and partyHpMpDisplayModes[i] ~= hpMode) then
+                            gConfig.partyListHpDisplayMode = partyHpMpDisplayModes[i];
+                            UpdateSettings();
+                        end
+                        if (is_selected) then
+                            imgui.SetItemDefaultFocus();
+                        end
+                    end
+                    imgui.EndCombo();
+                end
+                imgui.ShowHelp('How HP is displayed on each party row: 1234 / 100% / 1234 (100%) / 100% (1234) / 1234/1500.');
+
+                local mpMode = gConfig.partyListMpDisplayMode or 'Number Only';
+                if (imgui.BeginCombo('MP Display##partyList', mpMode)) then
+                    for i = 1, #partyHpMpDisplayModes, 1 do
+                        local is_selected = (partyHpMpDisplayModes[i] == mpMode);
+                        if (imgui.Selectable(partyHpMpDisplayModes[i], is_selected) and partyHpMpDisplayModes[i] ~= mpMode) then
+                            gConfig.partyListMpDisplayMode = partyHpMpDisplayModes[i];
+                            UpdateSettings();
+                        end
+                        if (is_selected) then
+                            imgui.SetItemDefaultFocus();
+                        end
+                    end
+                    imgui.EndCombo();
+                end
+                imgui.ShowHelp('How MP is displayed on each party row.');
             end
             if (imgui.Checkbox('Align Bottom', { gConfig.partyListAlignBottom })) then
                 gConfig.partyListAlignBottom = not gConfig.partyListAlignBottom;

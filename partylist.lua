@@ -42,6 +42,34 @@ local partyList1Pos = { x = 0, y = 0 };
 local targetWindowPrevH = 0;
 local treasurePoolActive = false;  -- tracked via incoming packets (see partyList.HandleIncomingPacket)
 
+-- Formats an HP/MP value according to a display mode string (XIUI labels).
+-- Mirrors the helper in playerbar.lua. Modes: 'Number Only' (default),
+-- 'Percent Only', 'Number (Percent)', 'Percent (Number)', 'Current/Max'.
+-- maxValue here is the back-computed maxhp/maxmp from HP/HPP, which can be
+-- 0 or NaN for dead/zoning members - in those cases we fall back to plain
+-- Number Only so the row never shows "0/0", division-garbage, or NaN.
+local function FormatHpMp(value, maxValue, mode)
+    value    = value    or 0;
+    maxValue = maxValue or 0;
+    local maxOk = (maxValue == maxValue) and (maxValue > 0);  -- NaN-safe
+
+    if (not maxOk or mode == nil or mode == 'Number Only') then
+        return tostring(value);
+    end
+
+    local pct = math.floor((value / maxValue) * 100 + 0.5);
+    if (mode == 'Percent Only') then
+        return string.format('%d%%', pct);
+    elseif (mode == 'Number (Percent)') then
+        return string.format('%d (%d%%)', value, pct);
+    elseif (mode == 'Percent (Number)') then
+        return string.format('%d%% (%d)', pct, value);
+    elseif (mode == 'Current/Max') then
+        return string.format('%d/%d', value, maxValue);
+    end
+    return tostring(value);
+end
+
 -- ============================================================================
 -- CAST COST: Inlined spell/ability/mount highlight detection and info panel.
 -- Anchors above the Target preview (or where it would be if target is hidden).
@@ -864,14 +892,14 @@ local function DrawMember(memIdx, settings)
             local nameStr = (#rawName > 10) and (string.sub(rawName, 1, 8) .. '..') or rawName;
             outlined(hpStartX, hpBarY - math.floor(textH / 2), white, nameStr);
 
-            local hpStr  = tostring(memInfo.hp);
+            local hpStr  = FormatHpMp(memInfo.hp, memInfo.maxhp, gConfig.partyListHpDisplayMode);
             local hpTW,_ = imgui.CalcTextSize(hpStr);
             local hpNumColor = memInfo.hpp >= 0.75 and white
                             or memInfo.hpp >= 0.50 and {1.0, 0.9, 0.2, 1.0}
                             or {1.0, 0.3, 0.3, 1.0};
             outlined(hpBarX + hpBarDrawWidth - hpTW - settings.dotRadius - 2, hpTextY, hpNumColor, hpStr);
 
-            local mpStr  = tostring(memInfo.mp);
+            local mpStr  = FormatHpMp(memInfo.mp, memInfo.maxmp, gConfig.partyListMpDisplayMode);
             local mpTW,_ = imgui.CalcTextSize(mpStr);
             outlined(mpBarX + mpBarDrawWidth - mpTW - settings.dotRadius - 2, mpTextY, white, mpStr);
 
@@ -1074,7 +1102,7 @@ local function DrawMember(memIdx, settings)
     memberText[memIdx].hp:SetColor(hpNameColor);
     memberText[memIdx].hp:SetPositionX(hpStartX + hpBarWidth + settings.hpTextOffsetX);
     memberText[memIdx].hp:SetPositionY(hpStartY + barHeight + settings.hpTextOffsetY);
-    memberText[memIdx].hp:SetText(tostring(memInfo.hp));
+    memberText[memIdx].hp:SetText(FormatHpMp(memInfo.hp, memInfo.maxhp, gConfig.partyListHpDisplayMode));
 
     if (memInfo.inzone) then
         progressbar.ProgressBar({{memInfo.hpp, hpGradient}}, {hpBarWidth, barHeight},
@@ -1108,7 +1136,7 @@ local function DrawMember(memIdx, settings)
         memberText[memIdx].mp:SetColor(gAdjustedSettings.mpColor);
         memberText[memIdx].mp:SetPositionX(mpStartX + mpBarWidth + settings.mpTextOffsetX);
         memberText[memIdx].mp:SetPositionY(mpStartY + barHeight + settings.mpTextOffsetY);
-        memberText[memIdx].mp:SetText(tostring(memInfo.mp));
+        memberText[memIdx].mp:SetText(FormatHpMp(memInfo.mp, memInfo.maxmp, gConfig.partyListMpDisplayMode));
 
         if (showTP) then
             imgui.SameLine();
