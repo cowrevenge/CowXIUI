@@ -367,8 +367,15 @@ local CHARM_ACTION_ID             = 0x34   -- ability id 52 = Charm
 -- us reset the persisted Stay timer so a fresh summon always starts at the
 -- jug's full duration, even when the previous pet of the same type died or
 -- was released within its window.
-local CALL_BEAST_ACTION_ID        = 0x1E   -- ability id 30 = Call Beast
-local BESTIAL_LOYALTY_ACTION_ID   = 0x1F   -- ability id 31 = Bestial Loyalty
+-- IMPORTANT: these are FFXI's global ability ids (the value carried in
+-- param @ 0x0C of an outgoing 0x01A action packet with category 9), NOT
+-- recast-timer ids. The previous values 0x1E/0x1F were wrong by ~3x: id 30
+-- is Astral Flow and id 31 is Berserk, which caused every Berserk press on
+-- a WAR/sub-WAR character to fire clear_jug_state(). Correct ids verified
+-- against Windower's resources_data/ability_recasts.lua (Call Beast
+-- action_id=85, Bestial Loyalty action_id=387).
+local CALL_BEAST_ACTION_ID        = 0x55   -- ability id 85  = Call Beast
+local BESTIAL_LOYALTY_ACTION_ID   = 0x183  -- ability id 387 = Bestial Loyalty
 local PKT_OUT_ACTION              = 0x01A
 local PKT_OUT_CHECK               = 0x0DD
 local PKT_IN_CHECK                = 0x029
@@ -2228,9 +2235,17 @@ function bsthud.HandleOutgoingPacket(e)
     local resMgr   = AshitaCore:GetResourceManager()
     if category ~= 9 then return end  -- 9 = Job Ability
 
+    -- Charm / Call Beast / Bestial Loyalty are BST-exclusive abilities.
+    -- Without this gate, a stale or wrong action-id constant can collide
+    -- with a non-BST JA and falsely trigger jug-state mutations (e.g. WAR
+    -- Berserk = id 31 used to match the old BESTIAL_LOYALTY_ACTION_ID = 0x1F
+    -- and wipe the saved jug timer every time the player hit Berserk on
+    -- DRG/WAR). Keep this gate even now that the ids are fixed.
+    local is_bst = (state.main_job == 9) or (state.sub_job == 9)
+
     -- Before resolving by name, catch Charm directly by id so we don't miss
     -- it if the resource manager is unavailable.
-    if param == CHARM_ACTION_ID and state.pet_origin == nil then
+    if is_bst and param == CHARM_ACTION_ID and state.pet_origin == nil then
         -- Capture target (what we're trying to charm) and queue a /check.
         -- The outgoing /check packet above will be retargeted at this id.
         state.charm_state      = CHARM_STATE_SENDING_PACKET
@@ -2248,7 +2263,7 @@ function bsthud.HandleOutgoingPacket(e)
     -- through to compute-fresh-then-save with the jug's full duration.
     -- Harmless if the cast fails (no jug equipped, etc.) — we just have no
     -- saved state, and there's no pet to restore for either.
-    if param == CALL_BEAST_ACTION_ID or param == BESTIAL_LOYALTY_ACTION_ID then
+    if is_bst and (param == CALL_BEAST_ACTION_ID or param == BESTIAL_LOYALTY_ACTION_ID) then
         vlog('Call Beast / Bestial Loyalty detected, clearing saved jug timer')
         clear_jug_state()
         -- Don't return; let the resource-manager naming pass below run too in
@@ -2258,7 +2273,7 @@ function bsthud.HandleOutgoingPacket(e)
     local ability = resMgr and resMgr:GetAbilityById(param)
     if ability == nil then return end
     local name = (ability.Name and ability.Name[1]) or ability.En or ''
-    if name == 'Call Beast' or name == 'Bestial Loyalty' then
+    if is_bst and (name == 'Call Beast' or name == 'Bestial Loyalty') then
         log('BST summon detected: ' .. name)  -- temporary: was vlog
         -- Fresh summon → drop any saved jug expire so the new pet starts at
         -- full duration. (Belt & suspenders with the ID check above; this
