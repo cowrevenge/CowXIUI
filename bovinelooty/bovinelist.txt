@@ -1,0 +1,6 @@
+# BovineLooty list
+# format: Name - ID   ( # = comment )
+Lot
+Hi-Potion - 4116
+Pass
+Scorpion Harness - 12579
