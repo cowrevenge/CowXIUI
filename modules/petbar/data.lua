@@ -100,65 +100,42 @@ data.allPetsWithImages = {
 -- Jug Pet Database (from PetMe addon)
 -- ============================================
 -- Each entry: name (in-game), maxLevel, duration (minutes)
+-- HorizonXI rules:
+--   All NQ Familiars are 30 minute duration (caps unchanged from retail).
+--   All HQ Familiars are 60 minute duration and cap at level 75.
+--   Pets also persist through zoning on HZ.
+-- Source: https://horizonffxi.wiki/Category:Familiars (27 familiars total)
 data.jugPets = {
-    -- 90 minute pets (lower level)
-    {name = 'FunguarFamiliar', maxLevel = 35, duration = 90},
-    {name = 'CourierCarrie', maxLevel = 23, duration = 90},
-    {name = 'SheepFamiliar', maxLevel = 35, duration = 90},
-    {name = 'TigerFamiliar', maxLevel = 40, duration = 90},
-    {name = 'FlytrapFamiliar', maxLevel = 40, duration = 90},
-    {name = 'LizardFamiliar', maxLevel = 45, duration = 90},
-    {name = 'MayflyFamiliar', maxLevel = 45, duration = 90},
+    -- NQ Familiars (30 min)
+    {name = 'HareFamiliar',     maxLevel = 35, duration = 30},
+    {name = 'SheepFamiliar',    maxLevel = 35, duration = 30},
+    {name = 'TigerFamiliar',    maxLevel = 40, duration = 30},
+    {name = 'FlytrapFamiliar',  maxLevel = 40, duration = 30},
+    {name = 'FlowerpotBill',    maxLevel = 40, duration = 30},
+    {name = 'LizardFamiliar',   maxLevel = 45, duration = 30},
+    {name = 'MayflyFamiliar',   maxLevel = 45, duration = 30},
+    {name = 'EftFamiliar',      maxLevel = 45, duration = 30},
+    {name = 'BeetleFamiliar',   maxLevel = 45, duration = 30},
+    {name = 'AntlionFamiliar',  maxLevel = 50, duration = 30},
+    {name = 'CrabFamiliar',     maxLevel = 55, duration = 30},
+    {name = 'MiteFamiliar',     maxLevel = 55, duration = 30},
+    {name = 'FunguarFamiliar',  maxLevel = 65, duration = 30},
 
-    -- 60 minute pets (mid level)
-    {name = 'EftFamiliar', maxLevel = 50, duration = 60},
-    {name = 'BeetleFamiliar', maxLevel = 55, duration = 60},
-    {name = 'AntlionFamiliar', maxLevel = 55, duration = 60},
-    {name = 'MiteFamiliar', maxLevel = 55, duration = 60},
-    {name = 'KeenearedSteffi', maxLevel = 75, duration = 60},
-    {name = 'LullabyMelodia', maxLevel = 75, duration = 60},
-    {name = 'FlowerpotBen', maxLevel = 75, duration = 60},
-    {name = 'FlowerpotBill', maxLevel = 75, duration = 60},
-    {name = 'Homunculus', maxLevel = 75, duration = 60},
-    {name = 'VoraciousAudrey', maxLevel = 75, duration = 60},
-    {name = 'AmbusherAllie', maxLevel = 75, duration = 60},
-    {name = 'LifedrinkerLars', maxLevel = 75, duration = 60},
-    {name = 'PanzerGalahad', maxLevel = 75, duration = 60},
-    {name = 'ChopsueyChucky', maxLevel = 75, duration = 60},
-    {name = 'AmigoSabotender', maxLevel = 75, duration = 60},
-
-    -- 30 minute pets (high level)
-    {name = 'CraftyClyvonne', maxLevel = 75, duration = 30},
-    {name = 'BloodclawShasra', maxLevel = 75, duration = 30},
-    {name = 'GorefangHobs', maxLevel = 75, duration = 30},
-    {name = 'DipperYuly', maxLevel = 75, duration = 30},
-    {name = 'SunburstMalfik', maxLevel = 75, duration = 30},
-    {name = 'WarlikePatrick', maxLevel = 75, duration = 30},
-    {name = 'ScissorlegXerin', maxLevel = 75, duration = 30},
-    {name = 'BouncingBertha', maxLevel = 75, duration = 30},
-    {name = 'RhymingShizuna', maxLevel = 75, duration = 30},
-    {name = 'AttentiveIbuki', maxLevel = 75, duration = 30},
-    {name = 'SwoopingZhivago', maxLevel = 75, duration = 30},
-    {name = 'GenerousArthur', maxLevel = 75, duration = 30},
-    {name = 'ThreestarLynn', maxLevel = 75, duration = 30},
-    {name = 'BrainyWaluis', maxLevel = 75, duration = 30},
-    {name = 'FaithfulFalcorr', maxLevel = 75, duration = 30},
-    {name = 'SharpwitHermes', maxLevel = 99, duration = 30},
-    {name = 'HeadbreakerKen', maxLevel = 99, duration = 30},
-    {name = 'RedolentCandi', maxLevel = 99, duration = 30},
-    {name = 'AlluringHoney', maxLevel = 99, duration = 30},
-    {name = 'CaringKiyomaro', maxLevel = 99, duration = 30},
-    {name = 'VivaciousVickie', maxLevel = 99, duration = 30},
-    {name = 'HurlerPercival', maxLevel = 99, duration = 30},
-    {name = 'BlackbeardRandy', maxLevel = 99, duration = 30},
-    {name = 'FleetReinhard', maxLevel = 99, duration = 30},
-    {name = 'GooeyGerard', maxLevel = 99, duration = 30},
-    {name = 'CrudeRaphie', maxLevel = 99, duration = 30},
-    {name = 'DroopyDortwin', maxLevel = 99, duration = 30},
-    {name = 'SunburstMalfik', maxLevel = 99, duration = 30},
-    {name = 'PonderingPeter', maxLevel = 99, duration = 30},
-    {name = 'MosquitoFamilia', maxLevel = 99, duration = 30},
-    {name = 'Left-HandedYoko', maxLevel = 99, duration = 30},
+    -- HQ Familiars (60 min, cap 75)
+    {name = 'CourierCarrie',    maxLevel = 75, duration = 60},
+    {name = 'Homunculus',       maxLevel = 75, duration = 60},
+    {name = 'KeenearedSteffi',  maxLevel = 75, duration = 60},
+    {name = 'LullabyMelodia',   maxLevel = 75, duration = 60},
+    {name = 'FlowerpotBen',     maxLevel = 75, duration = 60},
+    {name = 'SaberSiravarde',   maxLevel = 75, duration = 60},
+    {name = 'ShellbusterOrob',  maxLevel = 75, duration = 60},
+    {name = 'ColdbloodComo',    maxLevel = 75, duration = 60},
+    {name = 'VoraciousAudrey',  maxLevel = 75, duration = 60},
+    {name = 'AmbusherAllie',    maxLevel = 75, duration = 60},
+    {name = 'PanzerGalahad',    maxLevel = 75, duration = 60},
+    {name = 'LifedrinkerLars',  maxLevel = 75, duration = 60},
+    {name = 'ChopsueyChucky',   maxLevel = 75, duration = 60},
+    {name = 'AmigoSabotender',  maxLevel = 75, duration = 60},
 };
 
 -- ============================================
@@ -238,7 +215,9 @@ data.PacketID = {
 };
 
 data.ActionID = {
-    CHARM = 0x34,
+    CHARM            = 0x34,   -- ability id 52  = Charm
+    CALL_BEAST       = 0x55,   -- ability id 85  = Call Beast
+    BESTIAL_LOYALTY  = 0x183,  -- ability id 387 = Bestial Loyalty
 };
 
 data.CharmState = {
@@ -332,11 +311,15 @@ function data.TrackPetSummon(petName, petJob)
         data.petType = 'jug';
         -- Try to restore a saved timer (handles /reload, logout, brief d/c
         -- where the server kept the jug alive). Restore only if the saved
-        -- name matches AND the saved expire is still in the future; otherwise
-        -- compute fresh. Back-derive summon time so elapsed displays stay
-        -- continuous rather than resetting to "just now".
+        -- name matches, the saved expire is still in the future, AND it
+        -- fits the jug's CURRENT duration (the last gate guards against
+        -- stale files written by a previous addon version with different
+        -- duration values, which would otherwise leak through as a too-long
+        -- timer for a re-summon of the same jug type). Back-derive summon
+        -- time so elapsed displays stay continuous rather than resetting.
         local savedName, savedExp = data.LoadJugState();
-        if savedName == petName and savedExp and savedExp > os.time() then
+        local maxExp = os.time() + (jugInfo.duration * 60);
+        if savedName == petName and savedExp and savedExp > os.time() and savedExp <= maxExp then
             data.petExpireTime = savedExp;
             data.petSummonTime = savedExp - (jugInfo.duration * 60);
         else
@@ -391,16 +374,26 @@ function data.RestoreTimersFromConfig()
 
         -- For jug pets, check if timer hasn't expired
         if gConfig.petBarPetExpireTime then
-            if gConfig.petBarPetExpireTime > now then
+            -- Sanity cap: an expire from an older addon version (when the
+            -- jug's duration was longer) must be rejected, otherwise the
+            -- player sees a too-long timer until the next /jug. See the
+            -- matching cap in TrackPetSummon for the same logic on the
+            -- bsthud_jug_<sid>.dat path.
+            local maxExp = now;
+            local jugInfo = data.GetJugPetInfo(gConfig.petBarPetName);
+            if jugInfo then
+                maxExp = now + (jugInfo.duration * 60);
+            end
+            if gConfig.petBarPetExpireTime > now and
+               (jugInfo == nil or gConfig.petBarPetExpireTime <= maxExp) then
                  -- Timer still valid, restore it
                 data.petSummonTime = gConfig.petBarPetSummonTime;
                 data.petExpireTime = gConfig.petBarPetExpireTime;
                 data.petType = gConfig.petBarPetType;
                 data.lastTrackedPetName = gConfig.petBarPetName;
-                data.lastTrackedPetName = gConfig.petBarPetName;
                 data.charmExpireTime = gConfig.petBarCharmExpireTime;
             else
-                -- Timer expired, clear persisted data
+                -- Timer expired or out-of-range, clear persisted data
                 gConfig.petBarPetSummonTime = nil;
                 gConfig.petBarPetExpireTime = nil;
                 gConfig.petBarPetType = nil;
@@ -933,31 +926,46 @@ function data.GetPetRecasts()
                     timerEntry.isChargeAbility = true;
                     timerEntry.maxCharges = data.READY_MAX_CHARGES;
 
-                    -- Get timer data with modifier for accurate charge calculation
+                    -- Charge math ported from bsthud.lua (HXUI BST). Work in
+                    -- seconds throughout; convert to 1/60s ticks only at the
+                    -- boundaries that touch the rest of this module.
+                    --
+                    -- Two corrections vs the previous implementation:
+                    --   1. Modifier from GetAbilityTimerData is in 1/60s ticks
+                    --      (same scale as the recast timer itself), not seconds.
+                    --      Divide by 60 before mixing with second-valued bases.
+                    --   2. Next-charge countdown uses (duration - (max-1-charges)*cb)
+                    --      so it ticks down monotonically. The old `(timer-1) %
+                    --      chargeValue + 1` form oscillates ...3,2,1,0,44,43...
+                    --      as the recast crosses a multiple of chargeValue.
+                    local TICKS_PER_SEC = 60;
+                    local durationSec = timer / TICKS_PER_SEC;
+
                     local timerData = abilityRecast.GetAbilityTimerDataByTimerId(abilityInfo.id);
-                    local modifier = timerData.Modifier or 0;
+                    local modTicks  = (timerData and timerData.Modifier) or 0;
+                    local modSec    = modTicks / TICKS_PER_SEC;
 
-                    -- Calculate base recast using config value and modifier (like PetMe)
-                    -- Formula: baseRecast = 60 * (totalBaseSeconds + modifier) where totalBaseSeconds = perChargeSeconds * 3
                     local configBasePerCharge = gConfig.petBarReadyBaseRecast or data.READY_DEFAULT_BASE_SECONDS;
-                    local totalBaseSeconds = configBasePerCharge * data.READY_MAX_CHARGES;
-                    local baseRecast = 60 * (totalBaseSeconds + modifier);  -- In 1/60ths, modifier-adjusted
-                    local chargeValue = baseRecast / data.READY_MAX_CHARGES;  -- Per-charge time in 1/60ths
+                    local cycleBaseSec = configBasePerCharge * data.READY_MAX_CHARGES;
+                    local cbSec = (cycleBaseSec + modSec) / data.READY_MAX_CHARGES;
+                    if cbSec < 1 then cbSec = 1; end
+                    local totalSec = cbSec * data.READY_MAX_CHARGES;
 
-                    -- Store chargeValue for progress bar calculations in display.lua
-                    timerEntry.chargeValue = chargeValue;
+                    local charges = math.floor((totalSec - durationSec) / cbSec);
+                    if charges < 0 then charges = 0; end
+                    if charges > data.READY_MAX_CHARGES then charges = data.READY_MAX_CHARGES; end
 
-                    -- Calculate current charges from timer
-                    if timer <= 0 then
-                        timerEntry.charges = data.READY_MAX_CHARGES;
-                        timerEntry.nextChargeTimer = 0;
+                    local nextSec;
+                    if charges >= data.READY_MAX_CHARGES then
+                        nextSec = 0;
                     else
-                        -- Charges available = max - ceil(timer / chargeValue)
-                        local chargesRecharging = math.ceil(timer / chargeValue);
-                        timerEntry.charges = math.max(0, data.READY_MAX_CHARGES - chargesRecharging);
-                        -- Time until next charge = timer mod chargeValue (or timer if less than chargeValue)
-                        timerEntry.nextChargeTimer = ((timer - 1) % chargeValue) + 1;
+                        nextSec = durationSec - (data.READY_MAX_CHARGES - 1 - charges) * cbSec;
+                        if nextSec < 0 then nextSec = 0; end
                     end
+
+                    timerEntry.charges          = charges;
+                    timerEntry.nextChargeTimer  = nextSec * TICKS_PER_SEC;  -- back to 1/60s ticks for the display layer
+                    timerEntry.chargeValue      = cbSec   * TICKS_PER_SEC;
                 end
 
                 table.insert(timers, timerEntry);
@@ -1678,6 +1686,29 @@ function data.ClearJugState()
     if f then
         f:write('__cleared__\n0\n');
         f:close();
+    end
+end
+
+-- Called when an outgoing Call Beast / Bestial Loyalty is detected. Ported
+-- from bsthud.lua (see the comment at lines 2487-2517 there). A fresh summon
+-- can land on the same pet name as the prior one (e.g. second SheepFamiliar
+-- after the first died), and without this reset:
+--   * the persistent jug file (LoadJugState) still has the OLD expire,
+--   * lastTrackedPetName matches so TrackPetSummon's dedup gate early-returns,
+--   * petExpireTime stays at the old value,
+-- so the new pet inherits the dying one's timer ("36 mins" on a 30-min jug,
+-- etc.). Clear all three sources so TrackPetSummon recomputes from scratch
+-- when the new entity is resolved.
+function data.OnFreshJugSummon()
+    data.ClearJugState();
+    data.lastTrackedPetName = nil;
+    data.petExpireTime = nil;
+    -- Wipe the gConfig copy too, otherwise RestoreTimersFromConfig on a
+    -- later /reload would resurrect the stale expire.
+    if gConfig then
+        gConfig.petBarPetSummonTime = nil;
+        gConfig.petBarPetExpireTime = nil;
+        gConfig.petBarPetName       = nil;
     end
 end
 

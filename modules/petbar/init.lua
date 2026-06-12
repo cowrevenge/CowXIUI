@@ -176,6 +176,17 @@ petbar.Initialize = function(settings)
                 data.charmTarget = struct.unpack('H', e.data, 0x04 + 0x01);
                 data.charmTargetIdx = struct.unpack('H', e.data, 0x08 + 0x01);
                 AshitaCore:GetChatManager():QueueCommand(1, "/check");
+
+            -- Call Beast / Bestial Loyalty: a fresh jug is being summoned.
+            -- Drop any saved expire and the dedup name guard so when the new
+            -- pet entity lands, TrackPetSummon recomputes the full duration
+            -- instead of inheriting the prior pet's remaining time. Without
+            -- this, summoning a replacement jug mid-fight shows the old
+            -- timer (e.g. "36 min" on a 30-min jug). Ported from bsthud.lua.
+            elseif (category == 0x09 and
+                   (actionId == data.ActionID.CALL_BEAST or
+                    actionId == data.ActionID.BESTIAL_LOYALTY)) then
+                data.OnFreshJugSummon();
             end
         end
     end);

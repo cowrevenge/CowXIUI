@@ -659,6 +659,7 @@ function display.DrawWindow(settings)
     data.lastSettings = settings;
 
     local windowPosX, windowPosY = 0, 0;
+    local petBarW, petBarH = 0, 0;
 
     -- Panel style. Paired pops after imgui.End(). Pushed unconditionally — the
     -- NoBackground window flag (set above when the theme is not Plain) is what
@@ -675,7 +676,8 @@ function display.DrawWindow(settings)
         -- Draw the pet portrait first (on the window draw list) so it sits
         -- BEHIND the bars/text. Pass the window size (last frame's, for
         -- auto-resize) so clip-to-background works.
-        local mw, mh = imgui.GetWindowSize();
+        petBarW, petBarH = imgui.GetWindowSize();
+        local mw, mh = petBarW, petBarH;
         data.DrawPetImage(imgui.GetWindowDrawList(), windowPosX, windowPosY, mw, mh);
 
         -- Row 1: Pet Name (with optional level) (left) and HP% (right, same line)
@@ -688,12 +690,34 @@ function display.DrawWindow(settings)
         local showLevel = typeSettings.showLevel;
         if showLevel == nil then showLevel = gConfig.petBarShowLevel ~= false; end
         local displayName = petName;
+
+        -- For jug pets, append the max level cap (e.g., "CourierCarrie (75)")
+        local jugInfo = data.GetJugPetInfo(petName);
+        if jugInfo then
+            displayName = string.format('%s (%d)', displayName, jugInfo.maxLevel);
+        end
+
         if petLevel and showLevel then
-            displayName = string.format('Lv.%d %s', petLevel, petName);
+            displayName = string.format('Lv.%d %s', petLevel, displayName);
         end
 
         local nameColor = colorConfig.nameTextColor or 0xFFFFFFFF;
         petText(data.nameText, displayName, startX, startY, nameColor, nameFontSize, 0);
+
+        -- Click on the name → toggle the jug-pet reference list.
+        -- Uses a {bool} table-ref so the popup's X button (handled by imgui)
+        -- can write back to the same flag.
+        do
+            local nameW = math.max(80, #displayName * nameFontSize * 0.55);
+            local nameH = nameFontSize + 2;
+            local mX, mY = imgui.GetMousePos();
+            if imgui.IsMouseClicked(0)
+                and mX >= startX and mX <= startX + nameW
+                and mY >= startY and mY <= startY + nameH then
+                if data.jugListOpen == nil then data.jugListOpen = { false }; end
+                data.jugListOpen[1] = not data.jugListOpen[1];
+            end
+        end
 
         -- Distance text (anchored to top right edge of background)
         local showDistance = typeSettings.showDistance;
@@ -1170,6 +1194,29 @@ function display.DrawWindow(settings)
     -- Pop the panel style pushed before Begin.
     imgui.PopStyleVar(2);    -- WindowRounding, WindowBorderSize
     imgui.PopStyleColor(2);  -- WindowBg, Border
+
+    -- Jug Pet reference list (toggled by clicking the pet name).
+    -- NQ-only: HQs all cap at 75, no point listing them.
+    -- Open state is a {bool} table-ref so imgui's title-bar X writes back to it.
+    if data.jugListOpen and data.jugListOpen[1] then
+        local listFlags = bit.bor(
+            ImGuiWindowFlags_NoCollapse,
+            ImGuiWindowFlags_AlwaysAutoResize,
+            ImGuiWindowFlags_NoFocusOnAppearing
+        );
+        -- Anchor directly below the pet HUD (uses last-frame window size,
+        -- captured before imgui.End() above). FirstUseEver lets the user
+        -- drag the popup elsewhere afterwards.
+        imgui.SetNextWindowPos({ windowPosX, windowPosY + petBarH + 2 }, ImGuiCond_FirstUseEver);
+        if imgui.Begin('NQ Jug Caps', data.jugListOpen, listFlags) then
+            for _, pet in ipairs(data.jugPets) do
+                if pet.maxLevel < 75 then
+                    imgui.Text(string.format('  %-18s %d', pet.name, pet.maxLevel));
+                end
+            end
+        end
+        imgui.End();
+    end
 
     return true;  -- Pet exists (or preview mode), target window can render
 end
