@@ -403,7 +403,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
             hp = 0, hpp = 0, maxhp = 0, mp = 0, mpp = 0, maxmp = 0,
             tp = 0, job = '', level = '', subjob = '', subjoblevel = '',
             targeted = false, serverid = 0, buffs = nil, sync = false,
-            subTargeted = false, zone = '', inzone = false, name = '', leader = false,
+            subTargeted = false, zone = '', inzone = false, name = '', leader = false, allianceLeader = false,
         };
     end
 
@@ -762,10 +762,18 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     -- Retail-style member dots: yellow Leader dot to the LEFT of the name,
     -- red Sync dot to the right. Leader is enlarged and vertically centered on
     -- the name line (the name straddles the top edge of the HP bar).
+    -- Alliance leader (P1 leader when an alliance is formed) gets two yellow
+    -- dots side by side instead of one.
     do
         local leaderR   = settings.dotRadius * 1.5;        -- bigger leader dot
         local nameLineY = entryTop + nameRowH / 2;         -- name row center
-        if memInfo.leader then
+        if memInfo.allianceLeader then
+            -- Two dots side by side, touching at hpStartX (each straddles
+            -- one diameter to one side of the bar's left edge).
+            local fg = imgui.GetForegroundDrawList();
+            draw_circle({hpStartX - leaderR, nameLineY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
+            draw_circle({hpStartX + leaderR, nameLineY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
+        elseif memInfo.leader then
             -- Half inside: center on the left edge (hpStartX) so it straddles it.
             draw_circle(
                 {hpStartX, nameLineY},
@@ -856,7 +864,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             targeted = false, serverid = 0,
             buffs = nil, sync = false,
             subTargeted = false, zone = '',
-            inzone = false, name = '', leader = false
+            inzone = false, name = '', leader = false, allianceLeader = false
         };
     end
 
@@ -1458,8 +1466,24 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
 
     -- Draw leader icon (yellow). Layout 1 (compact): retail-style — enlarged,
     -- to the LEFT of the name, vertically centered on the name line. Other
-    -- layouts keep the original top-left-of-bar dot.
-    if (memInfo.leader) then
+    -- layouts keep the original top-left-of-bar dot. Alliance leader (P1 leader
+    -- when alliance is formed) gets two yellow dots side by side.
+    if (memInfo.allianceLeader) then
+        if layout == 1 then
+            local leaderR = settings.dotRadius * 1.5;
+            local dotY = hpStartY + hpBarHeight / 2;
+            local fg = imgui.GetForegroundDrawList();
+            -- Two dots adjacent, both LEFT of the bar; rightmost sits at the
+            -- single-dot anchor so the bar layout doesn't shift.
+            draw_circle({hpStartX - leaderR * 3 - 2, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
+            draw_circle({hpStartX - leaderR     - 2, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
+        else
+            -- Other layouts: small dots in the top-left of the bar.
+            local r  = settings.dotRadius;
+            draw_circle({hpStartX + r/2,         hpStartY + r/2}, r, {1, 1, .5, 1}, r * 3, true, nil, GetUIDrawList());
+            draw_circle({hpStartX + r/2 + r * 2, hpStartY + r/2}, r, {1, 1, .5, 1}, r * 3, true, nil, GetUIDrawList());
+        end
+    elseif (memInfo.leader) then
         if layout == 1 then
             local leaderR = settings.dotRadius * 1.5;
             local dotY = hpStartY + hpBarHeight / 2;   -- bar vertical center

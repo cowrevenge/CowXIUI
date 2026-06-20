@@ -519,6 +519,21 @@ function data.GetMemberInformation(memIdx)
         memberInfo.leader = false;
     end
 
+    -- Alliance leader: the actual alliance leader from the game's own party
+    -- data, NOT inferred from party 1. The alliance leader can sit in any of
+    -- the three parties (whichever leader formed the alliance keeps the role).
+    -- Ashita's IParty exposes this as GetAllianceLeaderServerId (v4) or the
+    -- older GetAllianceLeaderID (v3). Probe both, take whichever exists.
+    local allianceLeaderId = 0;
+    if type(party.GetAllianceLeaderServerId) == 'function' then
+        local ok, v = pcall(function() return party:GetAllianceLeaderServerId(); end);
+        if ok then allianceLeaderId = tonumber(v) or 0; end
+    elseif type(party.GetAllianceLeaderID) == 'function' then
+        local ok, v = pcall(function() return party:GetAllianceLeaderID(); end);
+        if ok then allianceLeaderId = tonumber(v) or 0; end
+    end
+    memberInfo.allianceLeader = (allianceLeaderId ~= 0) and (allianceLeaderId == memberServerId);
+
     if (memberInfo.inzone == true) then
         memberInfo.hp = party:GetMemberHP(memIdx);
         memberInfo.mp = party:GetMemberMP(memIdx);
