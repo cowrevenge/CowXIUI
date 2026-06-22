@@ -23,6 +23,7 @@ local castcostModule = require('config.castcost');
 local petbarModule = require('config.petbar');
 local notificationsModule = require('config.notifications');
 local treasurepoolModule = require('config.treasurepool');
+local hidepartyModule = require('config.hideparty');
 
 local treasurePool = require('modules.treasurepool.init');
 
@@ -120,6 +121,7 @@ local categories = {
     { name = 'castCost', label = 'Cast Cost' },
     { name = 'petBar', label = 'Pet Bar' },
     { name = 'notifications', label = 'Notifications' },
+    { name = 'hideparty', label = 'Hideparty' },
     { name = 'treasurePool', label = 'Treasure Pool' },
 };
 
@@ -214,6 +216,10 @@ local function DrawNotificationsSettings()
     notificationsModule.DrawSettings();
 end
 
+local function DrawHidepartySettings()
+    hidepartyModule.DrawSettings();
+end
+
 local function DrawTreasurePoolSettings()
     treasurepoolModule.DrawSettings();
 end
@@ -271,6 +277,10 @@ local function DrawNotificationsColorSettings()
     notificationsModule.DrawColorSettings();
 end
 
+local function DrawHidepartyColorSettings()
+    hidepartyModule.DrawColorSettings();
+end
+
 local function DrawTreasurePoolColorSettings()
     treasurepoolModule.DrawColorSettings();
 end
@@ -289,6 +299,7 @@ local settingsDrawFunctions = {
     DrawCastCostSettings,
     DrawPetBarSettings,
     DrawNotificationsSettings,
+    DrawHidepartySettings,
     DrawTreasurePoolSettings,
 };
 
@@ -305,6 +316,7 @@ local colorSettingsDrawFunctions = {
     DrawCastCostColorSettings,
     DrawPetBarColorSettings,
     DrawNotificationsColorSettings,
+    DrawHidepartyColorSettings,
     DrawTreasurePoolColorSettings,
 };
 

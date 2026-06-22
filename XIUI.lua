@@ -76,6 +76,13 @@ local statusHandler = require('handlers.statushandler');
 local progressbar = require('libs.progressbar');
 local TextureManager = require('libs.texturemanager');
 
+-- Hideparty module: hides the native FFXI party / alliance / target UI
+-- primitives. Self-registers its own load/d3d_present/unload Ashita callbacks
+-- under unique names (xiui_hideparty_*) so no further wiring is needed here.
+-- Config lives at gConfig.hideStockUI (defaults to hiding all four elements;
+-- see modules/hideparty.lua and config/hideparty.lua).
+require('modules.hideparty');
+
 -- Global switch to hard-disable functionality that is limited on HX servers
 HzLimitedMode = true;
 

@@ -841,7 +841,16 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 local mx, my = imgui.GetMousePos();
                 if mx >= hpStartX and mx <= hpStartX + entryWidth
                    and my >= entryTop and my <= entryTop + entryHeight then
-                    AshitaCore:GetChatManager():QueueCommand(-1, '/target ' .. memInfo.serverid);
+                    -- Sub-target mode (e.g., /ma "Cure" <stpc>): don't fire
+                    -- /target - it would cancel the sub-target context and
+                    -- rebind main. Instead, simulate arrow-key presses to
+                    -- walk the game's own sub-target cursor to this row.
+                    -- Player still presses Enter themselves to confirm.
+                    if data.frameCache.subTargetActive then
+                        st_walk_to(memIdx);
+                    else
+                        AshitaCore:GetChatManager():QueueCommand(-1, '/target ' .. memInfo.serverid);
+                    end
                 end
             end
         end
@@ -2296,7 +2305,12 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 end
                 if mx >= entryStartX and mx <= entryStartX + entryW
                    and my >= entryStartY and my <= entryStartY + entryH then
-                    AshitaCore:GetChatManager():QueueCommand(-1, '/target ' .. memInfo.serverid);
+                    -- See first click handler above for the sub-target rationale.
+                    if data.frameCache.subTargetActive then
+                        st_walk_to(memIdx);
+                    else
+                        AshitaCore:GetChatManager():QueueCommand(-1, '/target ' .. memInfo.serverid);
+                    end
                 end
             end
         end
@@ -2765,7 +2779,18 @@ function display.DrawCurrentTarget(settings)
             return;
         end
 
-        t1 = data.frameCache.t1;
+        -- During sub-target (e.g., /ma "Cure" <stpc>, /ja "Provoke" <stnpc>),
+        -- swap the target bar to show the sub-target cursor selection instead
+        -- of the held main target. frameCache.t2 is the cursor selection when
+        -- sub-targeting is active; frameCache.t1 stays on the original main
+        -- target so the bar snaps back automatically when sub-targeting ends.
+        -- Falls back to t1 if t2 is nil/0 (defensive: sub-target flag set but
+        -- cursor index not yet populated this frame).
+        if data.frameCache.subTargetActive and data.frameCache.t2 ~= nil and data.frameCache.t2 ~= 0 then
+            t1 = data.frameCache.t2;
+        else
+            t1 = data.frameCache.t1;
+        end
         if t1 == nil or t1 == 0 then
             data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
@@ -3216,7 +3241,19 @@ function display.GetCastCostAnchor(settings)
     local castCostGap = 14;  -- clears the "Target" label overhanging the target box top
     local bottomY;
 
-    if gConfig.showPartyListTarget then
+    -- Pair this with data.invalidateWindowRect not zeroing targetWindowPrevH.
+    -- We need to know whether the target is ACTUALLY drawing this frame, not
+    -- whether it's enabled in config. Config-on + no-current-target means the
+    -- target rect is invalid this frame and castcost should stack flush to the
+    -- party panel, not leave a phantom gap where the (invisible) target would
+    -- have lived.
+    local targetVisibleThisFrame = (
+        gConfig.showPartyListTarget
+        and data.windowRects.target
+        and data.windowRects.target.valid
+    );
+
+    if targetVisibleThisFrame then
         -- Target window IS shown: castcost anchors just above the VISIBLE target
         -- box. targetWindowPrevH is the FULL target content height, which
         -- includes the "Target"/"Locked" edge-label overhang on top AND bottom
@@ -3249,7 +3286,128 @@ end
 -- ============================================
 -- DrawWindow - Main entry point for rendering
 -- ============================================
+-- ============================================================
+-- Sub-target cursor auto-walker
+-- ============================================================
+-- When the player clicks a partymember while sub-target mode is active
+-- (e.g., /ma "Cure" <stpc>), Ashita's /target command can't be used - it
+-- would cancel the sub-target context and rebind main target. Instead we
+-- simulate arrow-key presses through Ashita's keyboard interface to walk
+-- the game's own sub-target cursor to the clicked row. The player still
+-- presses Enter to confirm; this only POSITIONS the cursor.
+--
+-- Wrap-aware shortest path: with N active partymembers, going from row A
+-- to row B costs `(B-A+N)%N` down-taps or `(A-B+N)%N` up-taps, whichever
+-- is fewer.
+--
+-- Tap pacing: each tap is press for HOLD frames, release for GAP frames.
+-- Press/release pair must span multiple frames so FFXI's input poll
+-- registers it as a discrete tap rather than a held key. Queue is driven
+-- one phase-step per frame from the top of DrawWindow.
+
+local DIK_UPARROW   = 0xC8;
+local DIK_DOWNARROW = 0xD0;
+local TAP_HOLD_FRAMES    = 2;
+local TAP_RELEASE_FRAMES = 2;
+
+local stKeyQueue = {};
+local stPhase    = 'idle';   -- 'idle' | 'pressed' | 'released'
+local stCurKey   = nil;
+local stFrames   = 0;
+
+-- Send a DirectInput key press/release. pcall'd because the input API
+-- shape can differ across Ashita builds; if it's wrong we abort silently
+-- rather than crashing the partylist render.
+local function st_set_key(scancode, pressed)
+    pcall(function()
+        local kb = AshitaCore:GetInputManager():GetKeyboard();
+        if kb ~= nil then
+            kb:SetKey(scancode, pressed);
+        end
+    end);
+end
+
+local function st_abort_queue()
+    if stCurKey ~= nil then
+        st_set_key(stCurKey, false);  -- release whatever's still held
+    end
+    stKeyQueue = {};
+    stPhase    = 'idle';
+    stCurKey   = nil;
+    stFrames   = 0;
+end
+
+-- Drive the queue one phase per frame. Called from the top of DrawWindow.
+local function st_process_queue()
+    -- Sub-target ended mid-walk (player canceled, cursor moved off-party,
+    -- spell resolved, etc.) - abort and release any held key.
+    if not data.frameCache.subTargetActive then
+        st_abort_queue();
+        return;
+    end
+
+    if stPhase == 'idle' then
+        local nextKey = table.remove(stKeyQueue, 1);
+        if nextKey == nil then return; end
+        st_set_key(nextKey, true);
+        stCurKey = nextKey;
+        stPhase  = 'pressed';
+        stFrames = TAP_HOLD_FRAMES;
+    elseif stPhase == 'pressed' then
+        stFrames = stFrames - 1;
+        if stFrames <= 0 then
+            st_set_key(stCurKey, false);
+            stPhase  = 'released';
+            stFrames = TAP_RELEASE_FRAMES;
+        end
+    elseif stPhase == 'released' then
+        stFrames = stFrames - 1;
+        if stFrames <= 0 then
+            stCurKey = nil;
+            stPhase  = 'idle';
+        end
+    end
+end
+
+-- Click handler entry: queue the right number of UP or DOWN taps to walk
+-- the sub-target cursor from its current row to the clicked memIdx.
+-- memIdx is the absolute partylist index (0..17). Sub-target party cursor
+-- only walks the user's own party (memIdx 0..5), so other indices are
+-- ignored. /stnpc, /stmob etc. don't have a useful stPartyIndex so we
+-- skip those modes silently.
+local function st_walk_to(memIdx)
+    local curRow = data.frameCache.stPartyIndex;
+    if curRow == nil then return; end
+    if memIdx < 0 or memIdx > 5 then return; end
+    local tgtRow = memIdx;
+
+    local pSize = data.frameCache.activeMemberCount and
+                  data.frameCache.activeMemberCount[1] or 0;
+    if pSize <= 1 or curRow == tgtRow then return; end
+
+    local fwd = (tgtRow - curRow + pSize) % pSize;
+    local bwd = (curRow - tgtRow + pSize) % pSize;
+
+    -- Replace any in-flight walk - the latest click wins.
+    st_abort_queue();
+
+    local key, count;
+    if fwd <= bwd then
+        key, count = DIK_DOWNARROW, fwd;
+    else
+        key, count = DIK_UPARROW, bwd;
+    end
+    for _ = 1, count do
+        table.insert(stKeyQueue, key);
+    end
+end
+
 function display.DrawWindow(settings)
+    -- Tick the sub-target cursor auto-walker one phase per frame. Has to
+    -- run BEFORE the early-out for zoning/no-party so a queued walk can
+    -- complete cleanly (or be aborted) regardless of party state.
+    st_process_queue();
+
     -- Reset the per-frame click-to-cure zone list before any member renders.
     BeginCureFrame();
 

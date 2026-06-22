@@ -110,12 +110,20 @@ end
 
 -- Mark a window as not rendered this frame (so children fall back to their
 -- own absolute position instead of stacking against stale data).
+--
+-- DO NOT zero data.targetWindowPrevH here. The previous value is the LAST
+-- KNOWN GOOD height; keeping it lets the target window re-appear at the
+-- correct anchor position on the very first frame after re-becoming valid
+-- (e.g., when the player re-acquires a target). Zeroing it caused a
+-- single-frame flicker where the bar drew at partyList1Pos.y (i.e., on top
+-- of party 1) before snapping to its proper offset the next frame.
+--
+-- Anchored children that need to know "was the target actually drawn this
+-- frame" should check r.valid, not the height value. See GetCastCostAnchor
+-- in display.lua for the right pattern.
 function data.invalidateWindowRect(name)
     local r = data.windowRects[name];
     if r then r.valid = false; end
-    if name == 'target' then
-        data.targetWindowPrevH = 0;
-    end
 end
 
 -- Return the anchor config for a window, falling back to defaults when the
