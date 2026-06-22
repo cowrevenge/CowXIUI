@@ -139,8 +139,9 @@ end
 --   19=Sleep_II 20=Curse_II 29=Mute     31=Plague
 -- Sleep (2) and Sleep_II (19) resolve to Cure — Cure wakes sleep in FFXI even at
 -- the lowest tier, the standard cure-wake healer play when the party eats a sleepga.
--- Slow (13) resolves to Haste rather than Erase — Haste both mitigates the speed
--- loss and provides a useful buff window.
+-- Slow (13) resolves to Erase — Erase removes the slow directly so the GCD
+-- is spent solving the actual problem (Haste was the older default but the
+-- recasts didn't line up; clicking a Slow icon now casts Erase).
 --
 -- Anything NOT in this table gets no click handler. We deliberately don't fall
 -- back to Erase for unknown IDs — too many "debuff" rows are short-lived /
@@ -154,7 +155,7 @@ local DEBUFF_CURES = {
     [6]  = 'Silena',
     [7]  = 'Stona',
     [9]  = 'Cursna',
-    [13] = 'Haste',
+    [13] = 'Erase',
     [15] = 'Cursna',
     [19] = 'Cure',
     [20] = 'Cursna',
@@ -459,6 +460,31 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     -- and they don't share an X anchor. Must come after hpStartX is declared.
     local barAreaLeft = hpStartX + (entryWidth - hpBarWidth);
 
+    -- ============================================
+    -- Leader / Alliance / Sync dot drawing
+    -- ============================================
+    -- Closure (captures hpStartX, entryWidth, entryTop, entryHeight, hpStartY,
+    -- memInfo, settings via upvalues). Called from inside each in-zone /
+    -- out-of-zone branch BEFORE the player name draw so the name — drawn after
+    -- this on the same FOREGROUND list — covers the dot's overlap with the name.
+    -- Foreground list (not window) so dots aren't clipped against the window
+    -- rect — that's what was hiding the sync dot at the bar's right edge.
+    local function drawMemberDots()
+        local leaderR     = settings.dotRadius * 1.5;
+        local barsCenterY = (hpStartY + (entryTop + entryHeight)) / 2;
+        local LEADER_SHIFT_X = 3;
+        local fg = imgui.GetForegroundDrawList();
+        if memInfo.allianceLeader then
+            draw_circle({hpStartX - leaderR * 3 + LEADER_SHIFT_X, barsCenterY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
+            draw_circle({hpStartX - leaderR     + LEADER_SHIFT_X, barsCenterY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
+        elseif memInfo.leader then
+            draw_circle({hpStartX + LEADER_SHIFT_X, barsCenterY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
+        end
+        if memInfo.sync then
+            draw_circle({hpStartX + entryWidth + leaderR * 2, barsCenterY}, leaderR, {1, 0.3, 0.3, 1}, leaderR * 3, true, nil, fg);
+        end
+    end
+
     -- Per-player alternating band (layout 2 / SuperCompact): full entry width,
     -- drawn BEFORE the icon/bars/text so it tints only the row background.
     drawAlternatingBand(memIdx, cache,
@@ -581,16 +607,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         local wDraw      = imgui.GetWindowDrawList();
         wDraw:AddRectFilled({hpStartX, barsTop}, {hpStartX + entryWidth, barsBottom}, fillCol);
 
-        -- (2) Player name LEFT-aligned at entryTop (same anchor as in-zone)
-        do
-            local nameStr = tostring(memInfo.name or '');
-            if #nameStr > 10 then
-                nameStr = nameStr:sub(1, 8) .. '..';
-            end
-            drawOutlinedText(nameStartX, entryTop, nameStr, {1, 1, 1, 1});
-        end
-
-        -- (3) Zone name centered in the black block
+        -- (2) Zone name centered in the black block.
         local zoneName = '';
         if memInfo.zone and AshitaCore then
             zoneName = AshitaCore:GetResourceManager():GetString('zones.names', memInfo.zone) or '';
@@ -601,6 +618,20 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
             barsTop + (barsHeight - zH) / 2,
             zoneName, {1, 1, 1, 1}
         );
+
+        -- (3) Leader / Alliance / Sync dots BEFORE the name so the name (added
+        -- after this on the foreground list) covers any overlap.
+        drawMemberDots();
+
+        -- (4) Player name LEFT-aligned at entryTop (same anchor as in-zone).
+        -- Drawn LAST so it overwrites the zone text wherever they overlap.
+        do
+            local nameStr = tostring(memInfo.name or '');
+            if #nameStr > 10 then
+                nameStr = nameStr:sub(1, 8) .. '..';
+            end
+            drawOutlinedText(nameStartX, entryTop, nameStr, {1, 1, 1, 1});
+        end
 
         imgui.SetCursorScreenPos({hpStartX, entryTop + entryHeight});
         imgui.Dummy({entryWidth + settings.cursorPaddingX2, 0});
@@ -723,6 +754,11 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 drawOutlinedText(hpStartX + entryWidth - hpW + SC_VALUE_NUM_OFFSET, entryTop, hpText, hpColor);
             end
 
+            -- Leader / Alliance / Sync dots BEFORE the name so the name (added
+            -- next on the same foreground list) covers any overlap with the
+            -- player name's first letter / right edge.
+            drawMemberDots();
+
             -- Name truncation: 10 chars or fewer render in full (so "Cowrevenge"
             -- fits as-is); 11+ render as the first 8 chars + '..'.
             local nameStr = tostring(memInfo.name or '');
@@ -757,36 +793,6 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         -- Advance imgui cursor past the entry block so the next member draws below.
         imgui.SetCursorScreenPos({hpStartX, entryTop + entryHeight});
         imgui.Dummy({entryWidth + settings.cursorPaddingX2, 0});
-    end
-
-    -- Retail-style member dots: yellow Leader dot to the LEFT of the name,
-    -- red Sync dot to the right. Leader is enlarged and vertically centered on
-    -- the name line (the name straddles the top edge of the HP bar).
-    -- Alliance leader (P1 leader when an alliance is formed) gets two yellow
-    -- dots side by side instead of one.
-    do
-        local leaderR   = settings.dotRadius * 1.5;        -- bigger leader dot
-        local nameLineY = entryTop + nameRowH / 2;         -- name row center
-        if memInfo.allianceLeader then
-            -- Two dots side by side, touching at hpStartX (each straddles
-            -- one diameter to one side of the bar's left edge).
-            local fg = imgui.GetForegroundDrawList();
-            draw_circle({hpStartX - leaderR, nameLineY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
-            draw_circle({hpStartX + leaderR, nameLineY}, leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, fg);
-        elseif memInfo.leader then
-            -- Half inside: center on the left edge (hpStartX) so it straddles it.
-            draw_circle(
-                {hpStartX, nameLineY},
-                leaderR, {1, 1, 0.5, 1}, leaderR * 3, true, nil, imgui.GetForegroundDrawList()
-            );
-        end
-        if memInfo.sync then
-            -- Red sync dot on the name line, right side, matching the leader size.
-            draw_circle(
-                {hpStartX + hpBarWidth + leaderR + 2, nameLineY},
-                leaderR, {1, 0.3, 0.3, 1}, leaderR * 3, true, nil, imgui.GetForegroundDrawList()
-            );
-        end
     end
 
     -- Target arrow cursor (subtarget / target). Same texture and tint logic as
@@ -1472,24 +1478,36 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         if layout == 1 then
             local leaderR = settings.dotRadius * 1.5;
             local dotY = hpStartY + hpBarHeight / 2;
+            -- Foreground list so dots aren't clipped by the window rect. Name
+            -- (foreground, drawn LATER in code) ends up on top of any overlap.
             local fg = imgui.GetForegroundDrawList();
-            -- Two dots adjacent, both LEFT of the bar; rightmost sits at the
-            -- single-dot anchor so the bar layout doesn't shift.
-            draw_circle({hpStartX - leaderR * 3 - 2, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
-            draw_circle({hpStartX - leaderR     - 2, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
+            local LEADER_SHIFT_X = 3;
+            -- Both alliance dots shifted RIGHT by one diameter (2*leaderR) from
+            -- their old positions — outer was at -3r, inner at -r. New: outer
+            -- sits where the single-leader dot does (-r, overlapping bar's left
+            -- edge), inner moves one diameter to the right (+r, INSIDE the bar).
+            -- Net effect: dot pair reads as "inside" the bar instead of trailing
+            -- off to the left over the icon area.
+            draw_circle({hpStartX - leaderR - 2 + LEADER_SHIFT_X, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
+            draw_circle({hpStartX + leaderR - 2 + LEADER_SHIFT_X, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, fg);
         else
-            -- Other layouts: small dots in the top-left of the bar.
+            -- Other layouts: small dots at the top-left of the bar. Keep the
+            -- inner dot at the same corner anchor as the single-leader dot so
+            -- single→alliance doesn't visually jump; place the second dot
+            -- OUTSIDE the bar to the left (used to be +r*2 which put it on
+            -- top of the player name).
             local r  = settings.dotRadius;
             draw_circle({hpStartX + r/2,         hpStartY + r/2}, r, {1, 1, .5, 1}, r * 3, true, nil, GetUIDrawList());
-            draw_circle({hpStartX + r/2 + r * 2, hpStartY + r/2}, r, {1, 1, .5, 1}, r * 3, true, nil, GetUIDrawList());
+            draw_circle({hpStartX - r * 2 + r/2, hpStartY + r/2}, r, {1, 1, .5, 1}, r * 3, true, nil, GetUIDrawList());
         end
     elseif (memInfo.leader) then
         if layout == 1 then
             local leaderR = settings.dotRadius * 1.5;
             local dotY = hpStartY + hpBarHeight / 2;   -- bar vertical center
-            -- Foreground (unclipped) list so the dot, which sits left of the bar
-            -- edge, isn't cut off by the window clip rect.
-            draw_circle({hpStartX - leaderR - 2, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, imgui.GetForegroundDrawList());
+            -- Foreground list so the dot isn't clipped; the name draws after
+            -- this on the same list and covers the dot's right edge.
+            local LEADER_SHIFT_X = 3;
+            draw_circle({hpStartX - leaderR - 2 + LEADER_SHIFT_X, dotY}, leaderR, {1, 1, .5, 1}, leaderR * 3, true, nil, imgui.GetForegroundDrawList());
         else
             draw_circle({hpStartX + settings.dotRadius/2, hpStartY + settings.dotRadius/2}, settings.dotRadius, {1, 1, .5, 1}, settings.dotRadius * 3, true, nil, GetUIDrawList());
         end
@@ -2203,18 +2221,20 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         end
     end
 
-    -- Sync indicator. Layout 1 (compact): RED dot to the RIGHT of the entry on
-    -- the name line (retail). Other layouts keep the original bottom-left dot.
+    -- Sync indicator. RED dot directly RIGHT of the HP bar's right edge.
+    -- IMPORTANT: in layout 1 the HP bar is NOT drawn at hpStartX — it's drawn
+    -- at `hpDrawX` (hpStartX + icon clearance + HX_BAR_INSET) so the icon
+    -- doesn't sit under the bar. The bar's actual right edge is therefore
+    -- `hpDrawX + hpBarWidth`, NOT `hpStartX + hpBarWidth`. Using the wrong
+    -- anchor lands the dot inside the visible bar.
+    -- For layout 0, hpDrawX == hpStartX so the same formula works.
+    -- Foreground list so the dot isn't clipped by the window's right edge.
     if (memInfo.sync) then
-        if layout == 1 then
-            local syncR = settings.dotRadius * 1.5;        -- match the leader dot size
-            -- Name TOP is at (hpStartY - nameHeight/2), so its vertical CENTER is
-            -- hpStartY. Center the dot on the name line.
-            local dotY  = hpStartY + (textOffsets and textOffsets.nameY or 0);
-            -- Closer to the bar's right edge (straddling it), not fully past it.
-            draw_circle({hpStartX + hpBarWidth - syncR, dotY}, syncR, {1, 0.3, 0.3, 1}, syncR * 3, true, nil, imgui.GetForegroundDrawList());
-        else
-            draw_circle({hpStartX + settings.dotRadius/2, hpStartY + barHeight}, settings.dotRadius, {.5, .5, 1, 1}, settings.dotRadius * 3, true, nil, GetUIDrawList());
+        if layout == 1 or layout == 0 then
+            local syncR = settings.dotRadius * 1.5;
+            local dotY  = hpStartY + hpBarHeight / 2;
+            local barRightX = hpDrawX + hpBarWidth;
+            draw_circle({barRightX + syncR + 2, dotY}, syncR, {1, 0.3, 0.3, 1}, syncR * 3, true, nil, imgui.GetForegroundDrawList());
         end
     end
 
@@ -2320,14 +2340,17 @@ function display.DrawPartyWindow(settings, party, partyIndex)
 
     local cache = data.partyConfigCache[partyIndex];
     local partyMemberCount = data.frameCache.activeMemberCount[partyIndex];
+    local windowKey = 'party' .. partyIndex;
 
     if (partyIndex == 1 and not gConfig.showPartyListWhenSolo and partyMemberCount <= 1) then
         data.UpdateTextVisibility(false);
+        data.invalidateWindowRect(windowKey);
         return;
     end
 
     if(partyIndex > 1 and partyMemberCount == 0) then
         data.UpdateTextVisibility(false, partyIndex);
+        data.invalidateWindowRect(windowKey);
         return;
     end
 
@@ -2352,12 +2375,47 @@ function display.DrawPartyWindow(settings, party, partyIndex)
     if not plainBg then
         windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoBackground);
     end
+
+    -- ============================================
+    -- Anchor resolution (party 2 / party 3)
+    -- ============================================
+    -- Party 1 is the chain root and never auto-anchors. Party B/C look up
+    -- their configured parent in data.windowRects. Resolved here (before
+    -- windowFlags is finalized and before Begin) so we can both add NoMove
+    -- and queue SetNextWindowPos with the parent's rect.
+    --
+    -- Cross-module parent (castcost) reads last frame's rect since castcost
+    -- renders after partylist this frame — one-frame lag, not visually noticeable.
+    local anchoredPos = nil;
+    if partyIndex >= 2 then
+        local parentRect, anchorCfg = data.getAnchorParentRect(windowKey);
+        if parentRect ~= nil then
+            local selfRect = data.windowRects[windowKey];
+            local selfH = (selfRect and selfRect.h) or 0;
+
+            -- X: align child's left to parent's left. Both windows are designed
+            -- around the same content width, so left-edge match looks natural.
+            local newX = parentRect.x;
+            local newY;
+            if (anchorCfg.edge or 'above') == 'below' then
+                newY = parentRect.y + parentRect.h + (anchorCfg.offsetY or 0);
+            else
+                -- 'above': child bottom kisses parent top + offsetY. Pull child
+                -- up by its own height. offsetY is usually negative/zero so the
+                -- child sits a few px above the parent.
+                newY = parentRect.y - selfH + (anchorCfg.offsetY or 0);
+            end
+            anchoredPos = { newX, newY };
+        end
+    end
+
     -- Shift-gated drag: when partyListShiftDrag is on (default) the window only moves while
     -- the user is holding Shift. This prevents accidentally yanking the window when clicking
     -- on members (the row-wide click-to-target InvisibleButton overlaps the whole entry).
     -- Set gConfig.partyListShiftDrag = false to restore classic always-drag behavior.
+    -- Anchored windows are NEVER user-movable (the anchor system owns position).
     local shiftDragActive = (gConfig.partyListShiftDrag ~= false) and not imgui.GetIO().KeyShift;
-    if (gConfig.lockPositions or shiftDragActive) then
+    if (gConfig.lockPositions or shiftDragActive or anchoredPos ~= nil) then
         windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoMove);
     end
 
@@ -2383,6 +2441,12 @@ function display.DrawPartyWindow(settings, party, partyIndex)
     local winPad = (cache.layout == 2) and { 3, 3 } or { 10, 6 };
     imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, winPad);
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 4);
+
+    -- Push the anchored position now that all StyleVars are set up.
+    if anchoredPos ~= nil then
+        imgui.SetNextWindowPos(anchoredPos, ImGuiCond_Always);
+    end
+
     if (imgui.Begin(windowName, true, windowFlags)) then
         imguiPosX, imguiPosY = imgui.GetWindowPos();
         -- Capture Party 1's screen position so anchored sub-windows
@@ -2428,17 +2492,25 @@ function display.DrawPartyWindow(settings, party, partyIndex)
 
         data.UpdateTextVisibility(true, partyIndex);
 
+        -- Per-party sizing: Dynamic (cache.expandHeight=false, default) draws
+        -- only the live members. Expand Height (cache.expandHeight=true) forces
+        -- all 6 slots like retail. Used to be gated on partyIndex==1 — that's
+        -- the long-standing bug where B/C ignored their own Expand Height
+        -- checkbox. minRows is the per-party floor for either mode.
+        local expandThis = cache.expandHeight == true;
+        local minRowsThis = cache.minRows or 1;
+
         local lastVisibleMemberIdx = firstPlayerIndex;
         for i = firstPlayerIndex, lastPlayerIndex do
             local relIndex = i - firstPlayerIndex
-            if ((partyIndex == 1 and settings.expandHeight) or relIndex < partyMemberCount or relIndex < settings.minRows) then
+            if (expandThis or relIndex < partyMemberCount or relIndex < minRowsThis) then
                 lastVisibleMemberIdx = i;
             end
         end
 
         for i = firstPlayerIndex, lastPlayerIndex do
             local relIndex = i - firstPlayerIndex
-            if ((partyIndex == 1 and settings.expandHeight) or relIndex < partyMemberCount or relIndex < settings.minRows) then
+            if (expandThis or relIndex < partyMemberCount or relIndex < minRowsThis) then
                 display.DrawMember(i, settings, i == lastVisibleMemberIdx);
             else
                 data.UpdateTextVisibilityByMember(i, false);
@@ -2542,8 +2614,10 @@ function display.DrawPartyWindow(settings, party, partyIndex)
     imgui.PopStyleVar(4);     -- FramePadding, ItemSpacing, WindowPadding, WindowRounding
     imgui.PopStyleColor(2);   -- WindowBg, Border
 
-    -- Handle bottom alignment
-    if (settings.alignBottom and imguiPosX ~= nil) then
+    -- Handle bottom alignment. Skipped while the window is anchored — the
+    -- anchor system owns position and a competing SetWindowPos here would
+    -- flicker the window between two locations every frame.
+    if (settings.alignBottom and imguiPosX ~= nil and anchoredPos == nil) then
         if (partyIndex == 1 and gConfig.partyListState ~= nil and gConfig.partyListState.x ~= nil) then
             local oldValues = gConfig.partyListState;
             gConfig.partyListState = {};
@@ -2578,6 +2652,17 @@ function display.DrawPartyWindow(settings, party, partyIndex)
             data.pendingSettingsSave = true;
         end
     end
+
+    -- ============================================
+    -- Rect capture (for anchor system)
+    -- ============================================
+    -- Publish the final rect so other windows in the anchor chain can stack
+    -- against this one. Includes any alignBottom Y adjustment above.
+    if imguiPosX ~= nil and menuWidth and menuHeight then
+        data.captureWindowRect(windowKey, imguiPosX, imguiPosY, menuWidth, menuHeight);
+    else
+        data.invalidateWindowRect(windowKey);
+    end
 end
 
 -- ============================================
@@ -2598,10 +2683,12 @@ end
 function display.DrawCurrentTarget(settings)
     if not gConfig.showPartyListTarget then
         if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
+        data.invalidateWindowRect('target');
         return;
     end
     if data.partyList1Pos.x == 0 and data.partyList1Pos.y == 0 then
         if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
+        data.invalidateWindowRect('target');
         return;
     end
 
@@ -2673,14 +2760,14 @@ function display.DrawCurrentTarget(settings)
         entity       = AshitaCore:GetMemoryManager():GetEntity();
         playerTarget = AshitaCore:GetMemoryManager():GetTarget();
         if entity == nil or playerTarget == nil then
-            data.targetWindowPrevH = 0;
+            data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
         end
 
         t1 = data.frameCache.t1;
         if t1 == nil or t1 == 0 then
-            data.targetWindowPrevH = 0;
+            data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
         end
@@ -2688,7 +2775,7 @@ function display.DrawCurrentTarget(settings)
         targetName = entity:GetName(t1);
         targetHPP  = entity:GetHPPercent(t1) / 100;
         if targetName == nil or targetName == '' then
-            data.targetWindowPrevH = 0;
+            data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
         end
@@ -3055,6 +3142,21 @@ function display.DrawCurrentTarget(settings)
     imgui.PopStyleVar(4);    -- FramePadding, ItemSpacing, WindowPadding, WindowRounding
     imgui.PopStyleColor(2);  -- WindowBg, Border
     data.targetWindowPrevH = wH;
+
+    -- Publish target rect for the anchor chain. The "visible" rect is what
+    -- matters for stacking (oversized invisible content would create huge
+    -- gaps), so use realBox bounds when available.
+    do
+        local rectX = wX;
+        local rectY = realBoxY1 or wY;
+        local rectW = wW;
+        local rectH = (realBoxY1 and realBoxY2) and (realBoxY2 - realBoxY1) or wH;
+        if rectW and rectH and rectW > 0 and rectH > 0 then
+            data.captureWindowRect('target', rectX, rectY, rectW, rectH);
+        else
+            data.invalidateWindowRect('target');
+        end
+    end
 
     -- Update / hide the target's textured bg primitive to match party 1.
     if not plainBg then

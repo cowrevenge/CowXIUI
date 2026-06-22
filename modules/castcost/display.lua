@@ -127,6 +127,13 @@ function M.SetHidden(hidden)
         windowState.height = nil;
         -- Clear shared state when hidden
         shared.Clear();
+        -- Tell partylist anchor system this window isn't rendering this frame
+        pcall(function()
+            local partylistData = require('modules.partylist.data');
+            if partylistData and partylistData.invalidateWindowRect then
+                partylistData.invalidateWindowRect('castcost');
+            end
+        end);
     end
 end
 
@@ -198,6 +205,14 @@ function M.Render(itemInfo, itemType, settings, colors)
         end
         -- Clear shared state when no selection
         shared.Clear();
+        -- Invalidate anchor registry entry so party B/C don't try to stack
+        -- against a stale castcost rect.
+        pcall(function()
+            local partylistData = require('modules.partylist.data');
+            if partylistData and partylistData.invalidateWindowRect then
+                partylistData.invalidateWindowRect('castcost');
+            end
+        end);
         return;
     end
 
@@ -544,11 +559,39 @@ function M.Render(itemInfo, itemType, settings, colors)
             end
         end
     end
+    -- Capture final castcost rect just before End, while the window is still
+    -- the topmost imgui context. Published to the partylist anchor registry
+    -- so party B/C can stack above castcost (one-frame lag from partylist's
+    -- POV since castcost renders after partylist this frame).
+    local _ccRectX, _ccRectY, _ccRectW, _ccRectH = nil, nil, nil, nil;
+    do
+        local ok1, x, y = pcall(imgui.GetWindowPos);
+        local ok2, w, h = pcall(imgui.GetWindowSize);
+        if ok1 and ok2 and x and y and w and h and w > 0 and h > 0 then
+            _ccRectX, _ccRectY, _ccRectW, _ccRectH = x, y, w, h;
+        end
+    end
+
     imgui.End();
 
     -- Pair pops for the panel style push above.
     imgui.PopStyleVar(2);   -- WindowPadding, WindowRounding
     imgui.PopStyleColor(2); -- WindowBg, Border
+
+    -- Publish to partylist's anchor registry. pcall-guarded because castcost
+    -- can technically load before partylist; if data isn't ready yet we just
+    -- skip this frame and party B/C will see an invalid rect (= fall through
+    -- to their own absolute position, no crash).
+    pcall(function()
+        local partylistData = require('modules.partylist.data');
+        if partylistData and partylistData.captureWindowRect then
+            if _ccRectX ~= nil then
+                partylistData.captureWindowRect('castcost', _ccRectX, _ccRectY, _ccRectW, _ccRectH);
+            else
+                partylistData.invalidateWindowRect('castcost');
+            end
+        end
+    end);
 end
 
 return M;

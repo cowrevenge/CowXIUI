@@ -309,6 +309,112 @@ function M.DrawSettings(state)
     imgui.ShowHelp('Shows the current target above the party list. Always anchored to the party list - there is no separate position option for this bar.');
     components.DrawCheckbox('Anchor Cast Cost to Party List', 'partyListAnchorCastCost');
     imgui.ShowHelp('When ON, the Cast Cost bar is anchored above the party list (above the Target Bar if it is shown). When OFF, the Cast Cost bar uses its own configured position from the Cast Cost settings.');
+
+    -- ============================================
+    -- Anchoring (per-window parent picker)
+    -- ============================================
+    -- Each child window (Party B, Party C) picks which window it stacks
+    -- against. The natural chain matches retail-style layouts going UP
+    -- from Main:  Main → Target → CastCost → Party B → Party C
+    -- "None" leaves the window at its own draggable absolute position.
+    if components.CollapsingSection('Anchoring##partyListAnchors') then
+        imgui.TextWrapped('Each window can stack against another window. Default chain (going up from Main): Target above Main, Cast Cost above Target, Party B above Cast Cost, Party C above Party B. Pick "None" to free-position any window.');
+        imgui.Spacing();
+
+        -- Master defaults (mirrors data.anchorDefaults in modules.partylist.data).
+        -- Duplicated here so this file stays self-contained for the config UI.
+        local anchorDefaults = {
+            party2   = { parent = 'castcost', edge = 'above', offsetY = 0 },
+            party3   = { parent = 'party2',   edge = 'above', offsetY = 0 },
+        };
+
+        -- Parent dropdown choices. Keys are the registry names; values are the
+        -- labels shown in the UI.
+        local parentChoices = {
+            { key = 'none',     label = 'None (free position)' },
+            { key = 'party1',   label = 'Party A (Main)' },
+            { key = 'party2',   label = 'Party B' },
+            { key = 'party3',   label = 'Party C' },
+            { key = 'target',   label = 'Target Bar' },
+            { key = 'castcost', label = 'Cast Cost' },
+        };
+
+        local function getLabelForKey(key)
+            for _, c in ipairs(parentChoices) do
+                if c.key == key then return c.label; end
+            end
+            return key or 'None';
+        end
+
+        -- Ensure gConfig.partyAnchors[name] exists with sensible defaults.
+        local function ensureAnchor(name)
+            if gConfig.partyAnchors == nil then gConfig.partyAnchors = {}; end
+            if gConfig.partyAnchors[name] == nil then
+                local def = anchorDefaults[name] or { parent = 'none', edge = 'above', offsetY = 0 };
+                gConfig.partyAnchors[name] = {
+                    parent  = def.parent,
+                    edge    = def.edge,
+                    offsetY = def.offsetY,
+                };
+            end
+            return gConfig.partyAnchors[name];
+        end
+
+        -- Single anchor row: label + parent dropdown + offset slider.
+        local function drawAnchorRow(displayName, windowKey, excludeKeys)
+            local cfg = ensureAnchor(windowKey);
+            imgui.Text(displayName);
+            imgui.SameLine();
+            imgui.PushItemWidth(170);
+            local comboId = 'Parent##anchor_' .. windowKey;
+            local currentLabel = getLabelForKey(cfg.parent);
+            if imgui.BeginCombo(comboId, currentLabel) then
+                for _, choice in ipairs(parentChoices) do
+                    -- Skip self-anchoring and any caller-supplied exclusions
+                    -- (e.g. don't let Party B anchor to Party B or Party C —
+                    -- the latter would create a cycle).
+                    local skip = (choice.key == windowKey);
+                    if excludeKeys then
+                        for _, ex in ipairs(excludeKeys) do
+                            if choice.key == ex then skip = true; break; end
+                        end
+                    end
+                    if not skip then
+                        local isSelected = (cfg.parent == choice.key);
+                        if imgui.Selectable(choice.label .. '##' .. windowKey .. '_' .. choice.key, isSelected) then
+                            cfg.parent = choice.key;
+                            UpdateSettings();
+                        end
+                        if isSelected then imgui.SetItemDefaultFocus(); end
+                    end
+                end
+                imgui.EndCombo();
+            end
+            imgui.PopItemWidth();
+
+            -- Offset slider only meaningful when an actual anchor is set.
+            if cfg.parent ~= 'none' then
+                imgui.SameLine();
+                imgui.PushItemWidth(110);
+                local v = { cfg.offsetY or 0 };
+                if imgui.SliderInt('Y offset##anchor_' .. windowKey, v, -50, 50) then
+                    cfg.offsetY = v[1];
+                    UpdateSettings();
+                end
+                imgui.PopItemWidth();
+            end
+        end
+
+        -- Party B can anchor to anything EXCEPT Party C (creates a cycle since
+        -- Party C anchors to Party B by default).
+        drawAnchorRow('Party B', 'party2', { 'party3' });
+        -- Party C can anchor to anything except itself (Party B->Party C is
+        -- fine; user could chain C->B->castcost if they want).
+        drawAnchorRow('Party C', 'party3', nil);
+
+        imgui.Spacing();
+        imgui.TextDisabled('Tip: Expand Height (per-party tab) forces 6 slots like retail; default is Dynamic which shrinks to current members.');
+    end
     
     imgui.Spacing();
 

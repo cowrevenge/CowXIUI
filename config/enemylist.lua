@@ -74,6 +74,48 @@ function M.DrawSettings()
         imgui.ShowHelp('Horizontal space between columns.');
     end
 
+    if components.CollapsingSection('Anchoring##enemyList') then
+        components.DrawCheckbox('Anchor to Party List Target Bar', 'enemyListAnchorTarget');
+        imgui.ShowHelp('When ON, the enemy list snaps to the side of the Target Bar inside the Party List instead of using its own dragged position. Falls back to the saved absolute position if the Target Bar is hidden.');
+
+        if gConfig.enemyListAnchorTarget then
+            -- Edge dropdown: left (default) or right of the target bar.
+            -- The enemy list sits to the SIDE of the party stack, not above/below.
+            if gConfig.enemyListAnchorTargetEdge == nil then
+                gConfig.enemyListAnchorTargetEdge = 'left';
+            end
+            -- Migrate any stale 'above'/'below' values from the old version.
+            local _curEdge = gConfig.enemyListAnchorTargetEdge;
+            if _curEdge ~= 'left' and _curEdge ~= 'right' then
+                gConfig.enemyListAnchorTargetEdge = 'left';
+            end
+            local edgeOptions = { 'Left', 'Right' };
+            local edgeCurrent = (gConfig.enemyListAnchorTargetEdge == 'right') and 2 or 1;
+            imgui.Text('Edge');
+            imgui.SameLine();
+            imgui.SetNextItemWidth(140);
+            if imgui.BeginCombo('##enemyListAnchorEdge', edgeOptions[edgeCurrent]) then
+                for idx = 1, #edgeOptions do
+                    local selected = (idx == edgeCurrent);
+                    if imgui.Selectable(edgeOptions[idx], selected) then
+                        gConfig.enemyListAnchorTargetEdge = (idx == 2) and 'right' or 'left';
+                        SaveSettingsOnly();
+                    end
+                    if selected then imgui.SetItemDefaultFocus(); end
+                end
+                imgui.EndCombo();
+            end
+            imgui.ShowHelp('"Left" puts the enemy list to the LEFT of the target bar (list grows up, right edge flush against target). "Right" puts it on the other side.');
+
+            components.DrawSlider('Anchor Offset X', 'enemyListAnchorOffsetX', -200, 200);
+            imgui.ShowHelp('Extra horizontal nudge from the auto-computed side position. Slider value 0 = the baseline anchor position; move in either direction to shift.');
+            components.DrawSlider('Anchor Offset Y', 'enemyListAnchorOffsetY', -100, 100);
+            imgui.ShowHelp('Vertical nudge — slider value 0 = baseline position aligned with the target bar.');
+            components.DrawSlider('Distance to Target', 'enemyListAnchorGap', 0, 100);
+            imgui.ShowHelp('Gap between the enemy list and the target bar. Larger value = list further away from target. Default 6.');
+        end
+    end
+
     if components.CollapsingSection('Text Settings##enemyList') then
         components.DrawSlider('Name Text Size', 'enemyListNameFontSize', 8, 36);
         if (gConfig.showEnemyDistance) then

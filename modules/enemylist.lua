@@ -171,12 +171,58 @@ enemylist.DrawWindow = function(settings)
 	local baseX = gConfig.enemyListX or 100;
 	local baseY = gConfig.enemyListY or 300;
 
+	-- ===== ANCHOR TO PARTY LIST TARGET BAR =====
+	-- When gConfig.enemyListAnchorTarget is on, the enemy list latches onto
+	-- the partylist's Target Bar so it stacks with the rest of the chain.
+	-- Edge is LEFT/RIGHT because the enemy list lives on the SIDE of the
+	-- party stack (not above/below it).
+	-- gConfig.enemyListAnchorTargetEdge: 'left' (default) or 'right'.
+	-- gConfig.enemyListAnchorOffsetX/Y:   fine-tune sliders on top of the baseline.
+	-- gConfig.enemyListAnchorGap:         gap between the list and the target bar.
+	-- Built-in baseline shifts (-96 X / +50 X / -18 Y) zero the slider start at
+	-- a visually correct position; user sliders move from there.
+	-- Falls back to the saved absolute position if the target bar isn't
+	-- rendering this frame (so the list doesn't snap to (0,0)).
+	local anchoredToTarget = false;
+	if gConfig.enemyListAnchorTarget then
+		local ok, partylistData = pcall(require, 'modules.partylist.data');
+		if ok and partylistData and partylistData.windowRects then
+			local tRect = partylistData.windowRects.target;
+			if tRect and tRect.valid then
+				local edge   = gConfig.enemyListAnchorTargetEdge or 'left';
+				local offX   = gConfig.enemyListAnchorOffsetX or 0;
+				local offY   = gConfig.enemyListAnchorOffsetY or 0;
+				local gap    = gConfig.enemyListAnchorGap or 6;
+
+				-- Y baseline: -18 lifts the list bottom above the target bottom
+				-- so the visible bottoms align after rounded corners / overhang.
+				local Y_BASELINE = -18;
+				baseY = tRect.y + tRect.h + Y_BASELINE + offY;
+
+				-- X baselines per edge — built-in starting position so the
+				-- slider at 0 looks right. Slider then nudges from there.
+				if edge == 'right' then
+					local X_BASELINE_RIGHT = 36;
+					baseX = tRect.x + tRect.w + gap + X_BASELINE_RIGHT + offX;
+				else
+					-- 'left': list right edge sits to the LEFT of target.x.
+					-- baseX = column-0's left edge, so subtract listW.
+					local X_BASELINE_LEFT = -96;
+					local listW = maxCols * rowW + math.max(0, maxCols - 1) * colSpacing;
+					baseX = tRect.x - listW - gap + X_BASELINE_LEFT + offX;
+				end
+				anchoredToTarget = true;
+			end
+		end
+	end
+
 	local drawList  = imgui.GetForegroundDrawList();
 
 	-- ===== SHIFT-CLICK DRAG MOVE =====
 	-- Hold Shift and drag anywhere over the list's bounding area to move it.
 	-- Position is stored in gConfig.enemyListX/Y and saved on release.
-	do
+	-- Skipped while anchored — the anchor owns position, dragging would fight it.
+	if not anchoredToTarget then
 		local okDrag = pcall(function()
 			local shiftDown = imgui.GetIO and imgui.GetIO().KeyShift;
 			if shiftDown == nil then
@@ -212,6 +258,9 @@ enemylist.DrawWindow = function(settings)
 			end
 		end);
 		if not okDrag then dragging = false; end
+	else
+		-- Ensure no stale drag state persists if user toggled anchor mid-drag.
+		dragging = false;
 	end
 
 	-- Colors
@@ -256,6 +305,38 @@ enemylist.DrawWindow = function(settings)
 	local debuffOffY    = (settings and settings.debuffOffsetY) or gConfig.enemyListDebuffOffsetY or 0;
 	local iconSize      = (settings and settings.iconSize) or 18;
 
+	-- ===== CURRENT-TARGET HIGHLIGHT =====
+	-- If the player's current target appears in the enemy list, wrap that row
+	-- in an orange selector (matches the partylist target-row styling). In
+	-- preview mode we hardcode the SECOND preview enemy (key 9002 = Goblin
+	-- Smithy) as the "current target" so the user can see it without holding
+	-- a real target while the config menu is open.
+	local currentTargetIdx = nil;
+	if isPreviewMode then
+		currentTargetIdx = 9002;
+	else
+		pcall(function()
+			local tm = AshitaCore:GetMemoryManager():GetTarget();
+			if tm then
+				local idx = tm:GetTargetIndex(0);   -- slot 0 = primary target
+				if idx and idx > 0 then currentTargetIdx = idx; end
+			end
+		end);
+	end
+
+	-- Selector colors. Use the per-list theming knobs already in
+	-- gConfig.colorCustomization.enemyList if present, else fall back to the
+	-- standard orange used for "Locked" elsewhere in the addon.
+	local selectorBorderU32, selectorFillU32;
+	do
+		local cc = gConfig.colorCustomization and gConfig.colorCustomization.enemyList;
+		local borderARGB = (cc and cc.targetBorderColor) or 0xFFff8c1a;  -- bright orange
+		local rgba = argbToTable(borderARGB);
+		selectorBorderU32 = imgui.GetColorU32(rgba);
+		-- Fill = same hue, low alpha so it tints the row without hiding text.
+		selectorFillU32 = imgui.GetColorU32({ rgba[1], rgba[2], rgba[3], 0.18 });
+	end
+
 	-- Render each row, walking columns.
 	for i = 1, #rows do
 		local r   = rows[i];
@@ -278,6 +359,20 @@ enemylist.DrawWindow = function(settings)
 		local bottom = baseY - fromBottom * (rowH + rowSpacing);
 		local top    = bottom - rowH;
 		local right  = left + rowW;
+
+		-- ===== CURRENT TARGET SELECTOR =====
+		-- Draw FIRST so the row's text and HP bar render on top (translucent
+		-- fill won't hide them anyway; this just keeps z-order tidy). The
+		-- selector wraps the full row with a small bleed so the border doesn't
+		-- clip against the HP bar's edges.
+		local isCurrentTarget = (currentTargetIdx ~= nil) and (k == currentTargetIdx);
+		if isCurrentTarget then
+			local pad = 2;
+			local selTL = { left - pad, top - pad };
+			local selBR = { right + pad, bottom + pad };
+			drawList:AddRectFilled(selTL, selBR, selectorFillU32, 3);
+			drawList:AddRect(selTL, selBR, selectorBorderU32, 3, 15, 2.0);
+		end
 
 		-- ===== LINE 1: Name (left) ... Distance (right) =====
 		local line1Y = top;

@@ -50,13 +50,110 @@ data.partyTitlesTexture = nil;
 -- ============================================
 -- Anchored windows (Target / Cast Cost) shared state
 -- ============================================
--- Captured each frame from Party 1's imgui window position so anchored
--- sub-windows (Target Bar, Cast Cost) can be positioned above it.
+-- Legacy mirrors (still read by older code paths and external modules).
+-- These shadow data.windowRects.party1 and data.windowRects.target.h.
 data.partyList1Pos = { x = 0, y = 0 };
-
--- Last frame's target-window height — used by Cast Cost anchor math so it
--- can stack above the target window with a small gap.
 data.targetWindowPrevH = 0;
+
+-- ============================================
+-- Window Rect Registry (anchor system)
+-- ============================================
+-- Each anchorable window captures its rendered rect here after Begin/End.
+-- Child windows read parents' rects from here to compute their own position.
+-- Cross-frame: castcost lives in a separate module and renders AFTER the
+-- partylist this frame, so any partylist window anchored to castcost reads
+-- last frame's rect (one-frame lag, invisible in practice).
+data.windowRects = {
+    party1   = { x = 0, y = 0, w = 0, h = 0, valid = false },
+    party2   = { x = 0, y = 0, w = 0, h = 0, valid = false },
+    party3   = { x = 0, y = 0, w = 0, h = 0, valid = false },
+    target   = { x = 0, y = 0, w = 0, h = 0, valid = false },
+    castcost = { x = 0, y = 0, w = 0, h = 0, valid = false },
+};
+
+-- Default anchor chain — matches the natural stack going UP from main party:
+--   Main (no parent)
+--     ^ target
+--       ^ castcost
+--         ^ party B
+--           ^ party C
+-- Users override these via gConfig.partyAnchors in the config menu.
+data.anchorDefaults = {
+    party2   = { parent = 'castcost', edge = 'above', offsetY = 0 },
+    party3   = { parent = 'party2',   edge = 'above', offsetY = 0 },
+    target   = { parent = 'party1',   edge = 'above', offsetY = 0 },
+    castcost = { parent = 'target',   edge = 'above', offsetY = 0 },
+};
+
+-- Choices exposed in the anchor parent dropdown.
+data.anchorParentChoices = { 'none', 'party1', 'party2', 'party3', 'target', 'castcost' };
+
+-- Capture a window's screen rect after it renders. The legacy mirrors are
+-- updated here too so any existing callers keep working without changes.
+function data.captureWindowRect(name, x, y, w, h)
+    local r = data.windowRects[name];
+    if r == nil then return; end
+    r.x = x or 0;
+    r.y = y or 0;
+    r.w = w or 0;
+    r.h = h or 0;
+    r.valid = (r.w > 0 and r.h > 0);
+
+    -- Legacy mirrors
+    if name == 'party1' then
+        data.partyList1Pos.x = r.x;
+        data.partyList1Pos.y = r.y;
+    elseif name == 'target' then
+        data.targetWindowPrevH = r.h;
+    end
+end
+
+-- Mark a window as not rendered this frame (so children fall back to their
+-- own absolute position instead of stacking against stale data).
+function data.invalidateWindowRect(name)
+    local r = data.windowRects[name];
+    if r then r.valid = false; end
+    if name == 'target' then
+        data.targetWindowPrevH = 0;
+    end
+end
+
+-- Return the anchor config for a window, falling back to defaults when the
+-- saved gConfig entry is missing or malformed. Always returns a table.
+function data.getAnchorConfig(name)
+    local saved = gConfig and gConfig.partyAnchors and gConfig.partyAnchors[name];
+    if saved and saved.parent then
+        return {
+            parent  = saved.parent,
+            edge    = saved.edge or 'above',
+            offsetY = saved.offsetY or 0,
+        };
+    end
+    local def = data.anchorDefaults[name];
+    if def then
+        return { parent = def.parent, edge = def.edge, offsetY = def.offsetY };
+    end
+    return { parent = 'none', edge = 'above', offsetY = 0 };
+end
+
+-- Resolve a window's anchor: returns (parentRect, cfg) when an anchor is
+-- active and the parent rect is valid, otherwise (nil, cfg). cfg is always
+-- returned so callers can read offsetY etc. without re-fetching.
+function data.getAnchorParentRect(name)
+    local cfg = data.getAnchorConfig(name);
+    if cfg.parent == nil or cfg.parent == 'none' then
+        return nil, cfg;
+    end
+    -- A window cannot anchor to itself.
+    if cfg.parent == name then
+        return nil, cfg;
+    end
+    local parentRect = data.windowRects[cfg.parent];
+    if parentRect == nil or not parentRect.valid then
+        return nil, cfg;
+    end
+    return parentRect, cfg;
+end
 
 -- Target Bar background primitive (lazily created on first DrawCurrentTarget
 -- call when not in modern mode). Mirrors party 1's textured bg theme so the
@@ -420,7 +517,12 @@ function data.GetMemberInformation(memIdx)
             memInfo.maxmp = 0;
             memInfo.mp = 0;
         end
-        memInfo.targeted = memIdx == 4 or memIdx == 10 or memIdx == 16;
+        -- Preview selectors only on Party A. Targeted = Player 5 (memIdx 4),
+        -- subTargeted = Player 3 (memIdx 2). Used to also flag members in
+        -- Party B and Party C, but the selectors there cluttered the preview
+        -- and gave the impression alliance windows had their own independent
+        -- target/subtarget state — they don't.
+        memInfo.targeted = memIdx == 4;
         memInfo.serverid = -memIdx - 1;
         -- Preview buffs/debuffs - different combinations per member
         -- Common buff IDs: 1=KO, 2=Sleep, 3=Poison, 4=Paralysis, 5=Blindness, 6=Silence, 7=Petrification
@@ -436,12 +538,15 @@ function data.GetMemberInformation(memIdx)
         };
         memInfo.buffs = previewBuffs[memIdx % 6];
         memInfo.sync = (memIdx == 0 or memIdx == 6 or memIdx == 12);   -- preview: sync dot on each party's lead member
-        memInfo.subTargeted = memIdx == 2 or memIdx == 8 or memIdx == 14;
+        memInfo.subTargeted = memIdx == 2;
         memInfo.zone = 100;
         -- Player 1 (memIdx 0) is always in zone (it's you). Vary the rest.
         memInfo.inzone = (memIdx == 0) or (memIdx % 4 ~= 0);
         memInfo.name = (memIdx % 6 == 1) and 'Thisisaverylongname' or ('Player ' .. (memIdx + 1));
         memInfo.leader = memIdx == 0 or memIdx == 6 or memIdx == 12;
+        -- Player 1 (memIdx 0) is the main-party leader = alliance leader, so
+        -- gets the two-dot rendering. Party B/C leads stay as single-dot.
+        memInfo.allianceLeader = (memIdx == 0);
         memInfo.previewDistance = memIdx == 0 and 0 or memIdx == 1 and 5.2 or memIdx == 2 and 12.8 or memIdx == 3 and 21.5 or memIdx == 4 and 35.0 or 18.3;
 
         -- Preview cast bars
@@ -712,6 +817,17 @@ function data.Reset()
     data.partyConfigCacheValid = false;
     data.partyConfigCacheVersion = -1;
     data.partyRefHeightsValid = false;
+
+    -- Invalidate captured window rects so anchored children don't try to
+    -- stack against rects from a previous addon load.
+    if data.windowRects then
+        for name, _ in pairs(data.windowRects) do
+            data.invalidateWindowRect(name);
+        end
+    end
+    data.partyList1Pos.x = 0;
+    data.partyList1Pos.y = 0;
+    data.targetWindowPrevH = 0;
 end
 
 return data;
