@@ -64,11 +64,28 @@ data.targetWindowPrevH = 0;
 -- partylist this frame, so any partylist window anchored to castcost reads
 -- last frame's rect (one-frame lag, invisible in practice).
 data.windowRects = {
-    party1   = { x = 0, y = 0, w = 0, h = 0, valid = false },
-    party2   = { x = 0, y = 0, w = 0, h = 0, valid = false },
-    party3   = { x = 0, y = 0, w = 0, h = 0, valid = false },
-    target   = { x = 0, y = 0, w = 0, h = 0, valid = false },
-    castcost = { x = 0, y = 0, w = 0, h = 0, valid = false },
+    -- Each rect has TWO independent flags:
+    --   valid   = "x/y/w/h are meaningful for layout/anchor decisions". Stays
+    --             true once the window has rendered at least once and the
+    --             dimensions are known. Only cleared by a HARD invalidate
+    --             (config toggled off, parent window missing, etc).
+    --   visible = "drawing visible content this frame". Cleared every frame
+    --             the window doesn't actually render (no target held, etc).
+    --
+    -- Consumers pick the field that matches their question:
+    --   "Where should I anchor in screen space?"            -> valid
+    --   "Should I stack above it / leave room for it?"       -> visible
+    --
+    -- The split lets the enemy list keep tracking the target bar's position
+    -- even when no target is held (so it doesn't snap back to its absolute
+    -- save position on every untargeted moment), while cast cost still
+    -- correctly stacks flush against party 1 when the target bar isn't
+    -- actually drawing.
+    party1   = { x = 0, y = 0, w = 0, h = 0, valid = false, visible = false },
+    party2   = { x = 0, y = 0, w = 0, h = 0, valid = false, visible = false },
+    party3   = { x = 0, y = 0, w = 0, h = 0, valid = false, visible = false },
+    target   = { x = 0, y = 0, w = 0, h = 0, valid = false, visible = false },
+    castcost = { x = 0, y = 0, w = 0, h = 0, valid = false, visible = false },
 };
 
 -- Default anchor chain — matches the natural stack going UP from main party:
@@ -88,8 +105,56 @@ data.anchorDefaults = {
 -- Choices exposed in the anchor parent dropdown.
 data.anchorParentChoices = { 'none', 'party1', 'party2', 'party3', 'target', 'castcost' };
 
--- Capture a window's screen rect after it renders. The legacy mirrors are
--- updated here too so any existing callers keep working without changes.
+-- ============================================================
+-- Social request state (party invite, trade request)
+-- ============================================================
+-- Populated by XIUI.lua's packet handlers (0x00DC, 0x0021, 0x0022) via the
+-- setter functions below. Read by display.lua to drive the cyan indicator
+-- on the right side of the party title bar.
+--
+-- Party invites: FFXI sends 0x00DC when an invite arrives but doesn't send
+-- an explicit "invite expired" packet. The invite popup itself times out
+-- after 30s if untouched, so we mirror that behavior: store os.time() when
+-- the invite arrives and consider it active for INVITE_TIMEOUT_S seconds.
+-- Accepting silently transitions to in-party (which we don't bother tracking
+-- separately - the indicator just times out naturally).
+--
+-- Trade requests: 0x0021 sets pending, 0x0022 (any trade resolution -
+-- cancel, complete, error) clears it.
+data.socialFlags = {
+    inviteTime   = 0,      -- os.time() when 0x00DC arrived; 0 = none active
+    tradePending = false,  -- true between 0x0021 and 0x0022
+};
+data.INVITE_TIMEOUT_S = 30;
+
+function data.SetPartyInvite()
+    data.socialFlags.inviteTime = os.time();
+end
+
+function data.ClearPartyInvite()
+    data.socialFlags.inviteTime = 0;
+end
+
+function data.HasPendingInvite()
+    if data.socialFlags.inviteTime == 0 then return false; end
+    return (os.time() - data.socialFlags.inviteTime) < data.INVITE_TIMEOUT_S;
+end
+
+function data.SetTradeRequest(active)
+    data.socialFlags.tradePending = (active == true);
+end
+
+function data.HasTradeRequest()
+    return data.socialFlags.tradePending == true;
+end
+
+function data.HasSocialRequest()
+    return data.HasPendingInvite() or data.HasTradeRequest();
+end
+
+-- Capture a window's screen rect after it renders. Both valid AND visible
+-- flip true. The legacy mirrors are updated here too so any existing callers
+-- keep working without changes.
 function data.captureWindowRect(name, x, y, w, h)
     local r = data.windowRects[name];
     if r == nil then return; end
@@ -97,7 +162,8 @@ function data.captureWindowRect(name, x, y, w, h)
     r.y = y or 0;
     r.w = w or 0;
     r.h = h or 0;
-    r.valid = (r.w > 0 and r.h > 0);
+    r.valid   = (r.w > 0 and r.h > 0);
+    r.visible = r.valid;
 
     -- Legacy mirrors
     if name == 'party1' then
@@ -108,22 +174,36 @@ function data.captureWindowRect(name, x, y, w, h)
     end
 end
 
--- Mark a window as not rendered this frame (so children fall back to their
--- own absolute position instead of stacking against stale data).
+-- Mark a window as not rendered this frame (so children that care about
+-- "is it stacking right now" fall back to their own absolute position
+-- instead of stacking against stale data).
+--
+-- This is a SOFT invalidation by default: it clears `visible` but leaves
+-- `valid` and the cached x/y/w/h intact. That lets consumers that just
+-- need to know the bar's last-known layout position (enemy list anchor,
+-- for example) keep functioning even when the bar isn't drawing this
+-- frame. Pass hard=true to also clear `valid` for cases where the layout
+-- info itself is genuinely stale (config toggle, parent gone, etc.).
 --
 -- DO NOT zero data.targetWindowPrevH here. The previous value is the LAST
 -- KNOWN GOOD height; keeping it lets the target window re-appear at the
--- correct anchor position on the very first frame after re-becoming valid
--- (e.g., when the player re-acquires a target). Zeroing it caused a
--- single-frame flicker where the bar drew at partyList1Pos.y (i.e., on top
--- of party 1) before snapping to its proper offset the next frame.
+-- correct anchor position on the very first frame after re-becoming
+-- visible (e.g., when the player re-acquires a target). Zeroing it caused
+-- a single-frame flicker where the bar drew at partyList1Pos.y (i.e., on
+-- top of party 1) before snapping to its proper offset the next frame.
 --
--- Anchored children that need to know "was the target actually drawn this
--- frame" should check r.valid, not the height value. See GetCastCostAnchor
--- in display.lua for the right pattern.
-function data.invalidateWindowRect(name)
+-- Anchored children that need to know "was the parent actually drawn this
+-- frame" should check r.visible. Children that need to know "is the
+-- parent's position well-defined for layout purposes" should check
+-- r.valid. See GetCastCostAnchor in display.lua for an example of the
+-- former; modules_enemylist.lua for the latter.
+function data.invalidateWindowRect(name, hard)
     local r = data.windowRects[name];
-    if r then r.valid = false; end
+    if r == nil then return; end
+    r.visible = false;
+    if hard == true then
+        r.valid = false;
+    end
 end
 
 -- Return the anchor config for a window, falling back to defaults when the
@@ -157,7 +237,13 @@ function data.getAnchorParentRect(name)
         return nil, cfg;
     end
     local parentRect = data.windowRects[cfg.parent];
-    if parentRect == nil or not parentRect.valid then
+    -- Use .visible (not .valid) here: the party-anchor chain wants to stack
+    -- against windows that are currently drawing this frame, not against a
+    -- stale layout-only rect. If you need "where would X be if it were
+    -- drawing" semantics instead (e.g., for an external module like the
+    -- enemy list to keep its anchor stable across target-less moments),
+    -- read data.windowRects[name].valid directly and use the cached x/y/w/h.
+    if parentRect == nil or not parentRect.visible then
         return nil, cfg;
     end
     return parentRect, cfg;
@@ -332,6 +418,8 @@ function data.updatePartyConfigCache()
         cache.showBookends = party.showBookends;
         cache.showTitle = party.showTitle;
         cache.flashTP = party.flashTP;
+        cache.rainbowTP = party.rainbowTP;
+        cache.targetHpColor = party.targetHpColor;
         cache.backgroundName = party.backgroundName;
         cache.bgScale = party.bgScale or 1;
         cache.borderScale = party.borderScale or 1;

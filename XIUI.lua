@@ -76,13 +76,6 @@ local statusHandler = require('handlers.statushandler');
 local progressbar = require('libs.progressbar');
 local TextureManager = require('libs.texturemanager');
 
--- Hideparty module: hides the native FFXI party / alliance / target UI
--- primitives. Self-registers its own load/d3d_present/unload Ashita callbacks
--- under unique names (xiui_hideparty_*) so no further wiring is needed here.
--- Config lives at gConfig.hideStockUI (defaults to hiding all four elements;
--- see modules/hideparty.lua and config/hideparty.lua).
-require('modules.hideparty');
-
 -- Global switch to hard-disable functionality that is limited on HX servers
 HzLimitedMode = true;
 
@@ -270,11 +263,16 @@ settingsMigration.RunStructureMigrations(gConfig, defaultUserSettings);
 
 -- ============================================================================
 -- StartKey migration:
--- If the user has no StartKey in their settings, replace their settings with the
--- current defaults (which carry our tuned UI settings) but PRESERVE the user's
--- on-screen window positions, then stamp StartKey = 1 so this runs only once.
+-- Acts as a "settings version" check. If the user's saved StartKey doesn't
+-- match the StartKey baked into the current defaults (from myconfig.lua),
+-- replace their settings with the current defaults, preserving on-screen
+-- window positions. Bump StartKey in myconfig.lua any time you want every
+-- existing user to pick up the new defaults on next load.
+--   Fires whenever the keys don't match - includes fresh installs (user
+-- has nil, defaults have 1) and version bumps (user has 1, defaults now 2).
 -- ============================================================================
-if gConfig.StartKey == nil then
+local expectedStartKey = defaultUserSettings.StartKey;
+if gConfig.StartKey ~= expectedStartKey then
     -- Window/position settings that must survive the reset (per-user placement).
     local POSITION_KEYS = {
         'partyListState',
@@ -299,8 +297,9 @@ if gConfig.StartKey == nil then
         gConfig[k] = v;
     end
 
-    -- Stamp StartKey so this migration never runs again for this user.
-    gConfig.StartKey = 1;
+    -- Stamp the current expected StartKey so this migration won't run again
+    -- until you bump the value in myconfig.lua.
+    gConfig.StartKey = expectedStartKey;
 
     -- Point the loaded config container at the new table and persist it.
     config.userSettings = gConfig;

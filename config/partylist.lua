@@ -85,7 +85,13 @@ local function DrawPartyTabContent(party, partyName)
             if party.layout == 1 or party.layout == 2 then
                 imgui.ShowHelp('In compact / super compact, the TP text will flash when at 1000+ TP.');
             end
+            components.DrawPartyCheckbox(party, 'Rainbow TP at 100%', 'rainbowTP');
+            if party.layout == 1 or party.layout == 2 then
+                imgui.ShowHelp('In compact / super compact, the TP text cycles through rainbow colors at 1000+ TP. Overrides Flash if both are on.');
+            end
         end
+        components.DrawPartyCheckbox(party, 'Target HP Color', 'targetHpColor');
+        imgui.ShowHelp('Color the Target window HP% text by HP threshold (100/50/33/25/0). Off = white.');
         components.DrawPartyCheckbox(party, 'Show Distance', 'showDistance');
         if party.showDistance then
             imgui.SameLine();

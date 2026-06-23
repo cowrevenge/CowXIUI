@@ -254,6 +254,32 @@ local function computeTpColorARGB(memInfo, cache)
     local fullColor  = cache.colors.tpFullTextColor  or 0xFFFFFFFF;
     local emptyColor = cache.colors.tpEmptyTextColor or 0xFF888888;
     if memInfo.tp < 1000 then return emptyColor; end
+
+    -- Rainbow mode: cycles full-saturation hues over ~3s. Overrides flash
+    -- when both are enabled. Layouts 1 (Compact) and 2 (SuperCompact) honor
+    -- this via the call sites in DrawMember and DrawMemberSuperCompact.
+    if cache.rainbowTP then
+        local cycle = 3;
+        local h = (os.clock() % cycle) / cycle;        -- 0..1
+        local h6 = h * 6;
+        local c  = 1.0;                                 -- chroma at S=1, V=1
+        local x  = c * (1 - math.abs((h6 % 2) - 1));
+        local r, g, b;
+        if     h6 < 1 then r, g, b = c, x, 0;
+        elseif h6 < 2 then r, g, b = x, c, 0;
+        elseif h6 < 3 then r, g, b = 0, c, x;
+        elseif h6 < 4 then r, g, b = 0, x, c;
+        elseif h6 < 5 then r, g, b = x, 0, c;
+        else                r, g, b = c, 0, x;
+        end
+        return bit.bor(
+            bit.lshift(0xFF, 24),
+            bit.lshift(math.floor(r * 255), 16),
+            bit.lshift(math.floor(g * 255), 8),
+                       math.floor(b * 255)
+        );
+    end
+
     if not cache.flashTP then return fullColor; end
 
     local flashColor = cache.colors.tpFlashColor or 0xFF3ECE00;
@@ -779,7 +805,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
             local tpText = tostring(memInfo.tp or 0);
             local tpW    = imgui.CalcTextSize(tpText);
             local tpColor;
-            if memInfo.tp >= 1000 and cache.flashTP then
+            if memInfo.tp >= 1000 and (cache.flashTP or cache.rainbowTP) then
                 tpColor = argbToRgbaTable(computeTpColorARGB(memInfo, cache));
             elseif memInfo.tp < 1000 then
                 tpColor = {0.4, 0.7, 1.0, 1.0};  -- blue
@@ -951,9 +977,11 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
     -- Layout 1 (HXUI): shorten the HP/MP bars (developer default). Done HERE,
     -- before allBarsLengths / selection-box / overlay geometry is derived, so
     -- everything downstream uses the shortened widths consistently.
+    --   MP bar gets an additional 10% trim on top of HX_BAR_WIDTH_MULT so it
+    -- reads visually shorter than the HP bar (per user preference).
     if layout == 1 then
         hpBarWidth = hpBarWidth * HX_BAR_WIDTH_MULT;
-        mpBarWidth = mpBarWidth * HX_BAR_WIDTH_MULT;
+        mpBarWidth = mpBarWidth * HX_BAR_WIDTH_MULT * 0.9;
     end
 
     local hpStartX, hpStartY = imgui.GetCursorScreenPos();
@@ -1068,6 +1096,17 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
     if layout == 1 then
         local iconClear = (hxIconSize > 0) and hxIconSize or 0;
         hpDrawX = hpStartX + iconClear + (HX_BAR_INSET * scale.x);
+    end
+
+    -- Stash the player slot's HP bar screen geometry so the target window
+    -- (DrawCurrentTarget) can align its HP bar to exactly the same pixels.
+    -- Computed from the actual draw positions, so it stays correct across
+    -- layout changes / anchor moves / scale changes without us having to
+    -- duplicate the math. Only the player slot (memIdx 0) is needed since
+    -- the target window always anchors above party 1.
+    if memIdx == 0 then
+        data.frameCache.playerHpBarLeft  = hpDrawX;
+        data.frameCache.playerHpBarRight = hpDrawX + hpBarWidth;
     end
 
     -- Calculate entryHeight based on layout
@@ -1920,11 +1959,20 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
 
             -- Layout 1: TP overlay in the EMPTY SPACE to the LEFT of the MP bar position.
             -- Drawn regardless of showMpBar so jobs without MP (WAR, MNK, SAM, etc.) still
-            -- show TP. Color turns green at >= 1000 (weapon-skill ready), white otherwise.
+            -- show TP. Color: at >= 1000, honors flashTP and rainbowTP (computed via
+            -- computeTpColorARGB - rainbow overrides flash); otherwise solid green at
+            -- 1000+ and white below 1000.
             if showTP and memInfo.inzone then
                 local tpStr = tostring(memInfo.tp);
                 local tpW, tpH2 = imgui.CalcTextSize(tpStr);
-                local tpColor = (memInfo.tp >= 1000) and {0.243, 0.808, 0, 1} or {1, 1, 1, 1};
+                local tpColor;
+                if memInfo.tp >= 1000 and (cache.flashTP or cache.rainbowTP) then
+                    tpColor = argbToRgbaTable(computeTpColorARGB(memInfo, cache));
+                elseif memInfo.tp >= 1000 then
+                    tpColor = {0.243, 0.808, 0, 1};   -- green (weapon-skill ready)
+                else
+                    tpColor = {1, 1, 1, 1};
+                end
                 -- TP value sits in the empty gap to the LEFT of the (narrower,
                 -- right-aligned) MP bar, right-aligned against the bar's left edge.
                 drawOutlinedText(mpStartX - tpW - 4, mpStartY + (mpBarHeight - tpH2) / 2, tpStr, tpColor);
@@ -2607,20 +2655,78 @@ function display.DrawPartyWindow(settings, party, partyIndex)
             IM_COL32_WHITE
         );
 
-        -- Trade / Treasure indicators flanking the title. Placeholder circles for
-        -- now (intended to become icons): TRADE on the left, TREASURE on the right.
-        -- Party 1 only (never on alliance parties B/C). Shown in preview.
-        if partyIndex == 1 and showConfig and showConfig[1] and gConfig.partyListPreview then
-            local dotR = settings.dotRadius * 2;
-            local dotY = titlePosY + math.floor(titleHeight / 2);
-            -- Trade (left) — cyan/blue.
-            draw_list:AddCircleFilled(
-                {titlePosX - dotR - 4, dotY}, dotR,
-                imgui.GetColorU32({0.20, 0.80, 1.0, 1.0}), dotR * 3);
-            -- Treasure (right) — gold.
-            draw_list:AddCircleFilled(
-                {titlePosX + titleWidth + dotR + 4, dotY}, dotR,
-                imgui.GetColorU32({1.0, 0.84, 0.0, 1.0}), dotR * 3);
+        -- Status indicators flanking the title.
+        --   LEFT  (gold): "Treas." - lit when the pool has any items.
+        --   RIGHT (cyan): "Trade" / "Invite" - split out individually so a
+        --                 trade request and an invite are distinguishable.
+        --                 If both fire at once, both labels render stacked.
+        -- Party 1 only (never on alliance parties B/C). No showConfig gate -
+        -- the indicators are live state, not preview-only. The previous version
+        -- accidentally gated on showConfig[1] which meant they only rendered
+        -- while the config window was open. Preview mode is handled per-label
+        -- below via gConfig.partyListPreview.
+        if partyIndex == 1 then
+            -- Match the codebase convention: preview only counts when the
+            -- config window is open AND the preview toggle is on. Using
+            -- gConfig.partyListPreview alone leaves the labels showing after
+            -- the config window is closed (the toggle persists). Mirrors
+            -- previewActive at line 2871 and the data.lua preview gate.
+            local previewMode = (showConfig and showConfig[1] and gConfig.partyListPreview) == true;
+
+            -- Real pool state via the treasurepool module. pcall'd so a missing
+            -- treasurepool module doesn't crash the partylist render - the icon
+            -- just won't appear.
+            local hasTreasure = false;
+            local ok, tpData = pcall(require, 'modules.treasurepool.data');
+            if ok and tpData ~= nil and type(tpData.HasItems) == 'function' then
+                local ok2, result = pcall(tpData.HasItems);
+                if ok2 then hasTreasure = (result == true); end
+            end
+
+            local hasInvite = false;
+            if type(data.HasPendingInvite) == 'function' then
+                local ok3, result3 = pcall(data.HasPendingInvite);
+                if ok3 then hasInvite = (result3 == true); end
+            end
+            local hasTrade = false;
+            if type(data.HasTradeRequest) == 'function' then
+                local ok4, result4 = pcall(data.HasTradeRequest);
+                if ok4 then hasTrade = (result4 == true); end
+            end
+
+            -- Use the existing drawOutlinedText helper (file-local at line 103)
+            -- which is the same path every other label in the addon uses (HP%,
+            -- TP, names). Earlier hand-rolled AddText calls here may have hit
+            -- a font context issue on the foreground draw list - this version
+            -- goes through the proven helper.
+            local GOLD = {1.0, 0.84, 0.0, 1.0};
+            local CYAN = {0.20, 0.80, 1.0, 1.0};
+
+            -- Treasure (left) - gold "Treas." Right-aligned so the text grows
+            -- away from the title.
+            if previewMode or hasTreasure then
+                local label = 'Treas.';
+                local tw, th = imgui.CalcTextSize(label);
+                local tx = titlePosX - tw - 6;
+                local ty = titlePosY + math.floor((titleHeight - th) / 2);
+                drawOutlinedText(tx, ty, label, GOLD);
+            end
+
+            -- Trade / Invite (right) - cyan, each on its own line so you can
+            -- see both when they fire at once. Left-aligned so they grow away
+            -- from the title; vertically centered as a block.
+            local rightLabels = {};
+            if previewMode or hasTrade  then rightLabels[#rightLabels + 1] = 'Trade';  end
+            if previewMode or hasInvite then rightLabels[#rightLabels + 1] = 'Invite'; end
+            if #rightLabels > 0 then
+                local _, lineH = imgui.CalcTextSize('Ag');
+                local blockH = lineH * #rightLabels;
+                local startY = titlePosY + math.floor((titleHeight - blockH) / 2);
+                local rx = titlePosX + titleWidth + 6;
+                for i, label in ipairs(rightLabels) do
+                    drawOutlinedText(rx, startY + (i - 1) * lineH, label, CYAN);
+                end
+            end
         end
     end
 
@@ -2697,12 +2803,12 @@ end
 function display.DrawCurrentTarget(settings)
     if not gConfig.showPartyListTarget then
         if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
-        data.invalidateWindowRect('target');
+        data.invalidateWindowRect('target', true);  -- hard: feature disabled, no layout
         return;
     end
     if data.partyList1Pos.x == 0 and data.partyList1Pos.y == 0 then
         if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
-        data.invalidateWindowRect('target');
+        data.invalidateWindowRect('target', true);  -- hard: no party 1 anchor source
         return;
     end
 
@@ -2774,7 +2880,7 @@ function display.DrawCurrentTarget(settings)
         entity       = AshitaCore:GetMemoryManager():GetEntity();
         playerTarget = AshitaCore:GetMemoryManager():GetTarget();
         if entity == nil or playerTarget == nil then
-            data.invalidateWindowRect('target');
+            data.invalidateWindowRect('target', true);  -- hard: API gone
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
         end
@@ -2792,6 +2898,11 @@ function display.DrawCurrentTarget(settings)
             t1 = data.frameCache.t1;
         end
         if t1 == nil or t1 == 0 then
+            -- Soft invalidate: no target held this frame, but the bar's last
+            -- known dimensions stay usable so the enemy list (and anything
+            -- else anchored to target) doesn't snap to its absolute position
+            -- between targets. Cast cost still stacks flush because it
+            -- checks .visible, which we just cleared.
             data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
@@ -2800,6 +2911,8 @@ function display.DrawCurrentTarget(settings)
         targetName = entity:GetName(t1);
         targetHPP  = entity:GetHPPercent(t1) / 100;
         if targetName == nil or targetName == '' then
+            -- Soft invalidate: transient race condition (target index set but
+            -- name not loaded this frame). Same reasoning as no-target above.
             data.invalidateWindowRect('target');
             if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
             return;
@@ -2820,31 +2933,41 @@ function display.DrawCurrentTarget(settings)
     local spawnType = 0;
     pcall(function() spawnType = entity:GetSpawnFlags(t1); end);
 
-    -- entityActionStatus: 47=Seeking(LFP), 85=Bazaar
+    -- entityActionStatus: action status. 47=Seeking(LFP), 85=Bazaar. This is
+    -- the "what is the player doing" enum, not the name-flag bitfield.
     local entityActionStatus = 0;
     pcall(function()
         local s = entity:GetStatus(t1);
         if s ~= nil then entityActionStatus = s; end
     end);
-    -- entitySearchFlags bits: 0x01=Away, 0x02=Mentor, 0x04=NewAdv, 0x08=LFG-in-party
-    local entitySearchFlags = 0;
+
+    -- entityRenderFlags1: Name flags (Party / Away / Anon / Mentor / New / etc).
+    -- entityRenderFlags2: Name flags (Bazaar / GM Icon / etc).
+    -- These come from the FFXI entity struct's render_t.Flags1 and Flags2
+    -- fields - the bits that control which icons FFXI itself draws next to
+    -- the target's name. Reading them via Ashita's GetRenderFlags1/2 (NOT
+    -- GetStatusServer, which is action status - a different field entirely).
+    local entityRenderFlags1 = 0;
+    local entityRenderFlags2 = 0;
+    local entityRenderFlags4 = 0;
     pcall(function()
-        local f = entity:GetStatusServer(t1);
-        if f ~= nil then entitySearchFlags = f; end
+        local f = entity:GetRenderFlags1(t1);
+        if f ~= nil then entityRenderFlags1 = f; end
     end);
-    -- Level Sync (buff 233) on the target.
+    pcall(function()
+        local f = entity:GetRenderFlags2(t1);
+        if f ~= nil then entityRenderFlags2 = f; end
+    end);
+    pcall(function()
+        local f = entity:GetRenderFlags4(t1);
+        if f ~= nil then entityRenderFlags4 = f; end
+    end);
+
+    -- Sync detection is now a single bit check in the constants block below
+    -- (F4_SYNC). All the party API / IPlayer buff / statushandler fallback
+    -- chain is gone - render flags are the source of truth, same as the icon
+    -- the game itself draws above the player's head.
     local targetIsSynced = false;
-    pcall(function()
-        local tid = entity:GetServerId(t1);
-        if tid ~= nil and tid ~= 0 and statusHandler ~= nil and statusHandler.get_member_status ~= nil then
-            local buffs = statusHandler.get_member_status(tid);
-            if buffs ~= nil then
-                for i = 1, #buffs do
-                    if buffs[i] == 233 then targetIsSynced = true; break; end
-                end
-            end
-        end
-    end);
 
     -- Preview overrides (entity reads above are no-ops in preview).
     if previewActive then
@@ -2852,27 +2975,140 @@ function display.DrawCurrentTarget(settings)
         targetIsSynced = true;
     end
 
+
+    -- =========================================================================
+    -- FFXI name flag decoding.
+    -- =========================================================================
+    -- Flags1 byte 2 (bits 16-23) is a BIT FIELD, not an enum. Multiple flags
+    -- can be set at the same time (e.g. /sea on + /away = 0x10 | 0x40 = 0x50).
+    -- Flags2 holds the bazaar/GM bits separately.
+    -- Flags4 holds the sync / "in any party" bits (the latter drives the
+    -- blue name color in native FFXI for any party member regardless of
+    -- whether they're in your party or someone else's).
+    --
+    -- TO UPDATE A GUESS: target a player with the known status, target a clean
+    -- baseline (no status), and XOR the two captures - the differing bit IS
+    -- the bit. Update the constant here, no other change needed.
+    -- =========================================================================
+    local statusByte = bit.band(bit.rshift(entityRenderFlags1, 16), 0xFF);
+
+    -- Flags1 bits (Party / Away / Anon block):
+    local FB_LFP_BIT     = 0x10;  -- CONFIRMED  /sea on, seeking party
+    local FB_AWAY_BIT    = 0x40;  -- CONFIRMED  /away toggle
+    local FB_NAME_BLUE   = 0x80;  -- CONFIRMED  client says "render name BLUE".
+                                  --            Confirmed triggers: /anon (Luan).
+                                  --            Possibly also fires in other
+                                  --            party-related states. Treat as
+                                  --            a black box: bit set = blue.
+                                  --            Note Autoshot (party leader of
+                                  --            another party, not /anon) had
+                                  --            this bit CLEAR and rendered
+                                  --            white - so "in another party"
+                                  --            is NOT a reliable trigger.
+    local FB_MENTOR_BIT  = 0x20;  -- GUESS      mentor icon - confirm with M-flagged target
+
+    -- Flags2 bits (Bazaar / GM Icon block):
+    local F2_BAZAAR      = 0x00000200;  -- CONFIRMED  /bazaar item set up
+    local F2_GM_ICON     = 0x10000000;  -- CONFIRMED  GM icon (vanilla FFXI).
+                                        --            HorizonXI repurposes this
+                                        --            bit for their hardcore-mode
+                                        --            marker. Same flag, different
+                                        --            sprite art on HzXI. Confirmed
+                                        --            via Fru (hardcore: f2 +0x10000000).
+
+    -- Flags4 bits.
+    --   F4_SYNC (0x00800000)    - Level Sync. CONFIRMED.
+    --   F4_NEW_ADV (0x00002000) - New Adventurer "?" icon. CONFIRMED via Jinada
+    --     (sb=0x00 f4=0x40002000) vs baseline Cow (f4=0x40000000).
+    --   0x01000000 - previously guessed as "in MY party" but Fru (HzXI hardcore
+    --     stranger, NOT in user party) and Autoshot (party leader of another
+    --     party, NOT in user party) also had this bit set, so the guess was
+    --     wrong. Likely tied to action state or some other render condition.
+    --     Demoted to unknown.
+    --   POSSIBLE: f0 bit 0x80000000 may be "party leader" - Autoshot (leader)
+    --     showed f0=0x80000200 while non-leaders show 0x00000200. Needs more
+    --     data to confirm.
+    local F4_SYNC      = 0x00800000;  -- CONFIRMED
+    local F4_NEW_ADV   = 0x00002000;  -- CONFIRMED
+
+    local isLFP        = bit.band(statusByte, FB_LFP_BIT)     ~= 0;
+    local isAway       = bit.band(statusByte, FB_AWAY_BIT)    ~= 0;
+    local isNameBlue   = bit.band(statusByte, FB_NAME_BLUE)   ~= 0;
+    local isMentor     = bit.band(statusByte, FB_MENTOR_BIT)  ~= 0;
+    local isNew        = bit.band(entityRenderFlags4, F4_NEW_ADV) ~= 0;
+    local hasBazaar    = bit.band(entityRenderFlags2, F2_BAZAAR) ~= 0;
+    local hasGmIcon    = bit.band(entityRenderFlags2, F2_GM_ICON) ~= 0;
+
+    -- Wire sync into the shared targetIsSynced flag (declared above before
+    -- preview override). Preview already forces targetIsSynced=true.
+    -- PC guard: the F4_SYNC bit also fires on NPCs for unrelated reasons,
+    -- so only honor it for player-character targets. (The proper isPC local
+    -- is computed in the name color block below; we recompute the bit here
+    -- so we don't have to hoist the whole block.)
+    if not previewActive
+        and bit.band(spawnType, 0x01) ~= 0
+        and bit.band(entityRenderFlags4, F4_SYNC) ~= 0
+    then
+        targetIsSynced = true;
+    end
+    -- NOTE: members of YOUR OWN party have statusByte 0x00 (FFXI doesn't set
+    -- the byte for your own party because you can already see them in your
+    -- party list - no marker needed). The 0x80 byte fires only for members
+    -- of OTHER parties, which is the case native FFXI colors blue.
+    -- NOTE: bazaar is NOT in this byte either. Don't try to use 0x80 for
+    -- the bazaar icon. Bazaar lives in a different field we haven't isolated.
+
     -- Name color logic mirroring FFXI conventions:
-    --   PC in party/alliance: blue
-    --   PC outside party     : white
+    --   PC in MY party       : blue (via party API)
+    --   PC in other party    : blue (via Flags1 statusByte 0x80)
+    --   PC alone             : white
     --   NPC (spawnType 0x02) : green
     --   Mob, claimed         : red
     --   Mob, unclaimed       : yellow
+    --
+    -- Party members go blue (yours via party API, others via 0x80 byte).
+    -- EXCEPTION: targeting yourself stays white - you don't get marked as
+    -- a party member of yourself. Skip the blue logic when the target's
+    -- serverId matches the player's own serverId.
     local nameColor = {1, 1, 1, 1};
     local isPC  = bit.band(spawnType, 0x01) ~= 0;
     local isNPC = bit.band(spawnType, 0x02) ~= 0;
     local isMob = bit.band(spawnType, 0x10) ~= 0;
     if isPC then
-        local party = AshitaCore:GetMemoryManager():GetParty();
-        local tid   = 0;
-        pcall(function() tid = entity:GetServerId(t1); end);
-        if party ~= nil then
-            for i = 0, 17 do
-                if party:GetMemberIsActive(i) ~= 0 and party:GetMemberServerId(i) == tid then
-                    nameColor = {0.45, 0.70, 1.0, 1.0};
-                    break;
+        local mySid = 0;
+        pcall(function()
+            mySid = AshitaCore:GetMemoryManager():GetParty():GetMemberServerId(0) or 0;
+        end);
+        local tid = 0;
+        pcall(function() tid = entity:GetServerId(t1) or 0; end);
+        local isSelf = (mySid ~= 0 and tid == mySid);
+
+        -- /anon (and other 0x80 triggers) recolor the name blue for ANY PC,
+        -- including yourself. Applied unconditionally so targeting your own
+        -- /anon'd character still goes blue, matching native FFXI behavior.
+        if isNameBlue then
+            nameColor = {0.45, 0.70, 1.0, 1.0};
+        end
+
+        -- MY party member via the party API. Same blue. Skip the lookup when
+        -- targeting self - you're not in your own party API list.
+        if not isSelf then
+            local party = AshitaCore:GetMemoryManager():GetParty();
+            if party ~= nil then
+                for i = 0, 17 do
+                    if party:GetMemberIsActive(i) ~= 0 and party:GetMemberServerId(i) == tid then
+                        nameColor = {0.45, 0.70, 1.0, 1.0};
+                        break;
+                    end
                 end
             end
+        end
+        -- LFP also recolors the name in native FFXI (matches the LFP icon).
+        -- Applied last so LFP overrides plain party blue when both are set.
+        -- Applies even when targeting yourself - native FFXI recolors your
+        -- own name too when /sea is on.
+        if isLFP then
+            nameColor = {0.45, 0.70, 1.00, 1.0};
         end
     elseif isNPC then
         nameColor = {0.45, 0.95, 0.45, 1.0};   -- NPC green
@@ -2891,21 +3127,42 @@ function display.DrawCurrentTarget(settings)
 
     -- Pick the single status icon to show (mirrors retail FFXI's player
     -- icon priority: only one icon at a time per player).
-    --   Mentor > NewAdv > Sync > Seeking(LFP) > Away > Bazaar
-    -- Bazaar is restricted to PCs only because action status 85 is shared
-    -- with mounts on monsters/NPCs.
+    --   Mentor > NewAdv > Sync > Away > LFP
+    --
+    -- The status byte (Flags1 bits 16-23) is an ENUM, not OR'd bit flags.
+    -- Constants are defined above (hoisted for the name color block).
+    -- Confirmed values:
+    --   0x00 = no flag (alone OR in MY party - FFXI omits the byte for
+    --          your own party members since they're in your party list)
+    --   0x10 = LFP    (Derezz:     0x0A100800) - "party flag" / searching
+    --   0x50 = Away   (Cowrevenge: 0x0A500800) - /away toggle
+    --   0x80 = In another party (Doublesoul: 0x0A800800) - drives the blue
+    --          name above. Does NOT mean bazaar.
+    -- Still unknown (debug print logs every target so we'll spot them):
+    --   Mentor, NewAdventurer, Bazaar.
+    --   - NewAdv: Xeen was 0x00 while in-my-party + new-adv + on chocobo,
+    --     so the new-adv signal likely lives in another field (Flags0/3/4
+    --     or StatusServer) - the wide debug print will catch it.
+    --   - Bazaar: Ozn showed 0x80 same as in-other-party Doublesoul, so
+    --     bazaar isn't separable on this byte either.
+    --   - Mentor: untested, still a guess.
+
     local statusIconKey, statusIconLabel, statusIconColor = nil, nil, nil;
-    if isPC and bit.band(entitySearchFlags, 0x02) ~= 0 then
+    if isPC and hasGmIcon then
+        -- Vanilla FFXI: GM. HorizonXI: hardcore-mode marker (repurposed bit).
+        -- Highest priority since on retail this is the most important visual.
+        statusIconKey, statusIconLabel, statusIconColor = 'gm',     'GM',   {0.85, 0.40, 1.00, 1.0};
+    elseif isPC and isMentor then
         statusIconKey, statusIconLabel, statusIconColor = 'mentor', 'Mtr',  {1.00, 0.85, 0.30, 1.0};
-    elseif isPC and bit.band(entitySearchFlags, 0x04) ~= 0 then
+    elseif isPC and isNew then
         statusIconKey, statusIconLabel, statusIconColor = 'new',    'New',  {0.40, 0.90, 0.40, 1.0};
     elseif targetIsSynced then
         statusIconKey, statusIconLabel, statusIconColor = 'sync',   'Sync', {1.00, 0.92, 0.20, 1.0};
-    elseif isPC and entityActionStatus == 47 then
-        statusIconKey, statusIconLabel, statusIconColor = 'lfp',    'LFP',  {0.45, 0.70, 1.00, 1.0};
-    elseif isPC and bit.band(entitySearchFlags, 0x01) ~= 0 then
+    elseif isPC and isAway then
         statusIconKey, statusIconLabel, statusIconColor = 'away',   'Away', {0.55, 0.55, 0.55, 1.0};
-    elseif isPC and entityActionStatus == 85 then
+    elseif isPC and isLFP then
+        statusIconKey, statusIconLabel, statusIconColor = 'lfp',    'LFP',  {0.45, 0.70, 1.00, 1.0};
+    elseif isPC and hasBazaar then
         statusIconKey, statusIconLabel, statusIconColor = 'bazaar', 'Baz',  {1.00, 0.80, 0.20, 1.0};
     end
     if statusIconKey ~= nil then ensureTargetStatusIcons(); end
@@ -3017,12 +3274,34 @@ function display.DrawCurrentTarget(settings)
             imgui.GetColorU32({ 0.3, 0.3, 0.5, 0.8 }), 4, 0, 1.0
         );
 
-        -- HP bar at FULL inner width to match the party HP bars (was 75%).
-        -- HP% text is overlaid on the RIGHT end of the bar instead of stealing
-        -- bar width. Layout reads: [edge] [HP bar .............. %] [edge]
-        local tbarWidth = barWidth;
-        local rightInsetBar = 10;
-        local barX = wX + winW - rightInsetBar - tbarWidth;   -- spans full inner width
+        -- HP bar matches the party HP bar's screen position EXACTLY by reading
+        -- the bar geometry captured during DrawMember for the player slot (see
+        -- data.frameCache.playerHpBar{Left,Right}). Falls back to the recomputed
+        -- formula on the first frame before the player row has drawn yet, or
+        -- if party 1 isn't visible.
+        local barLeft  = data.frameCache.playerHpBarLeft;
+        local barRight = data.frameCache.playerHpBarRight;
+        local tbarWidth;
+        local barX;
+        if barLeft and barRight and barRight > barLeft then
+            -- Captured geometry available - align pixel-perfect.
+            tbarWidth = barRight - barLeft;
+            barX      = barLeft;
+        else
+            -- Fallback: recompute using the same formula DrawMember uses.
+            local partyLayoutTpl = data.getLayoutTemplate(1);
+            local partyBarScales = data.getBarScales(1);
+            local partyBaseHpW   = (partyLayoutTpl.hpBarWidth or settings.hpBarWidth or 150)
+                                   * PARTY_BAR_BASE_WIDTH_MULT;
+            tbarWidth = partyBaseHpW * scale.x
+                * ((partyBarScales and partyBarScales.hpBarScaleX) or 1);
+            if cache.layout == 1 then
+                tbarWidth = tbarWidth * HX_BAR_WIDTH_MULT;
+            end
+            local rightInsetBar = 10;
+            barX = wX + winW - rightInsetBar - tbarWidth;
+        end
+
         local barY = barTopY;
         imgui.SetCursorScreenPos({ barX, barY });
         progressbar.ProgressBar(
@@ -3032,10 +3311,18 @@ function display.DrawCurrentTarget(settings)
 
         local textY = barY + math.floor((barHeight - lineH) / 2);
 
-        -- HP% overlaid on the RIGHT end of the bar.
+        -- HP% to the LEFT of the bar. White by default; if the per-party
+        -- "Target HP Color" config is on, color the text by HP threshold
+        -- (matches partylist member name-color via GetCustomHpColors at
+        -- 100% / 50% / 33% / 25% / 0%).
+        local pctColor = {1, 1, 1, 1};
+        if cache.targetHpColor then
+            local hpNameColor, _ = GetCustomHpColors(targetHPP, cache.colors);
+            if hpNameColor then pctColor = hpNameColor; end
+        end
         local pctStr  = string.format('%d', math.floor(targetHPP * 100));
         local pctW, _ = imgui.CalcTextSize(pctStr);
-        outlined(barX + tbarWidth - pctW - 6, textY, {1,1,1,1}, pctStr);
+        outlined(barX - pctW - 6, textY, pctColor, pctStr);
 
         -- Name row ABOVE the bar (pushed in from the edge). Distance on the right.
         local nameRowStr = tostring(targetName);
@@ -3056,31 +3343,12 @@ function display.DrawCurrentTarget(settings)
         -- (barWidth kept as the full inner width for the selector below.)
         local barWidth = tbarWidth;
 
-        -- Single status icon at the top-right of the HP bar. If a texture is
-        -- available for the active status, draw the texture; otherwise fall
-        -- back to a 2–3-letter colored label so the addon is still useful
-        -- before any icon assets are shipped. Position overlaps the bar's
-        -- top-right corner like a badge so it doesn't push other elements.
-        if statusIconKey ~= nil then
-            local tex      = targetStatusIcons and targetStatusIcons[statusIconKey] or nil;
-            local iconSize = 16;
-            local iconX    = barX + barWidth - iconSize - 2;
-            local iconY    = barY - math.floor(iconSize / 2);
-            if tex ~= nil then
-                imgui.GetWindowDrawList():AddImage(
-                    tonumber(ffi.cast('uint32_t', tex.image)),
-                    { iconX, iconY },
-                    { iconX + iconSize, iconY + iconSize },
-                    { 0, 0 }, { 1, 1 },
-                    imgui.GetColorU32({ 1, 1, 1, 1 })
-                );
-            else
-                local lblW, lblH = imgui.CalcTextSize(statusIconLabel);
-                local lblX       = barX + barWidth - lblW - 4;
-                local lblY       = barY - math.floor(lblH / 2);
-                outlined(lblX, lblY, statusIconColor, statusIconLabel);
-            end
-        end
+        -- Status icon for this target (LFP / Bazaar / Mentor / Away / Sync /
+        -- New) is drawn next to the "Target" title below, matching native
+        -- FFXI's positioning. The icon priority and texture lookup are done
+        -- once above (statusIconKey resolved at scan time,
+        -- ensureTargetStatusIcons() pre-loaded). Search this file for
+        -- "statusIconKey" further down to see where the title draw consumes it.
 
         -- Foreground outline helper (for elements that must sit ON TOP of the
         -- selector, which is itself on the foreground list).
@@ -3131,6 +3399,38 @@ function display.DrawCurrentTarget(settings)
             local titleX     = wX + math.floor((winW - titleW) / 2);
             local titleY     = rbY1 - math.floor(tH / 2);
             outlinedFg(fg, titleX, titleY, {0.75, 0.83, 0.90, 1.0}, titleStr);
+        end
+
+        -- Status icon (LFP / Bazaar / Mentor / Away / Sync / New) sits at the
+        -- top-right of the window border, centered ON the top border line (so
+        -- half overhangs above, half sits inside the box - same vertical
+        -- treatment as the "Target" title). Anchored to the WINDOW right edge,
+        -- not to the title, with a small inset so it doesn't clip against the
+        -- frame. Drawn on the foreground draw list (fg), which isn't clipped
+        -- by the imgui window, so overhanging the top border is safe.
+        if statusIconKey ~= nil then
+            local _, titleH    = imgui.CalcTextSize('Target');
+            local iconSize     = titleH + 4;       -- a touch bigger than title text
+            local rightInset   = 8;                -- gap from the window's right edge
+            local iconX        = wX + winW - iconSize - rightInset;
+            local iconY        = rbY1 - math.floor(iconSize / 2);  -- center on top border
+            local tex          = targetStatusIcons and targetStatusIcons[statusIconKey] or nil;
+            if tex ~= nil then
+                fg:AddImage(
+                    tonumber(ffi.cast('uint32_t', tex.image)),
+                    { iconX, iconY },
+                    { iconX + iconSize, iconY + iconSize },
+                    { 0, 0 }, { 1, 1 },
+                    imgui.GetColorU32({ 1, 1, 1, 1 })
+                );
+            else
+                -- Texture missing - fall back to the colored 2-3 letter label
+                -- so the indicator still works before icon assets ship.
+                local lblW, lblH = imgui.CalcTextSize(statusIconLabel);
+                local lblX = wX + winW - lblW - rightInset;
+                local lblY = rbY1 - math.floor(lblH / 2);
+                outlinedFg(fg, lblX, lblY, statusIconColor, statusIconLabel);
+            end
         end
 
         -- "Locked" centered on the BOTTOM edge of the box, flanked by a pair of
@@ -3250,7 +3550,10 @@ function display.GetCastCostAnchor(settings)
     local targetVisibleThisFrame = (
         gConfig.showPartyListTarget
         and data.windowRects.target
-        and data.windowRects.target.valid
+        and data.windowRects.target.visible  -- .visible = drawing right now,
+        -- not .valid (which stays true between targets so other consumers can
+        -- still read the bar's last-known layout position). See
+        -- data.invalidateWindowRect comments for the soft/hard split.
     );
 
     if targetVisibleThisFrame then
