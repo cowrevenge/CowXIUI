@@ -49,7 +49,7 @@ function M.createConfigOverrides()
             ["hpBarScaleX"] = 0.85,
             ["hpDisplayMode"] = "both",
             ["layout"] = 1,
-            ["mpDisplayMode"] = "both",
+            ["mpDisplayMode"] = "number",
             ["showDistance"] = true,
         },
         ["partyB"] = T{

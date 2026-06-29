@@ -428,45 +428,78 @@ end);
 ashita.events.register('d3d_present', 'present_cb', function ()
     if not bInitialized then return; end
 
-    -- Process pending visual updates outside the render loop
+    -- Process pending visual updates outside the render loop. Wrapped in pcall
+    -- so a broken module's UpdateVisuals can't take down the present chain
+    -- (which would also prevent the config menu from rendering and recovering).
     if pendingVisualUpdate then
         pendingVisualUpdate = false;
-        statusHandler.clear_cache();
-        UpdateUserSettings();
-        uiModules.UpdateVisualsAll(gAdjustedSettings);
+        local ok, err = pcall(function()
+            statusHandler.clear_cache();
+            UpdateUserSettings();
+            uiModules.UpdateVisualsAll(gAdjustedSettings);
+        end);
+        if not ok then
+            _xiuiPendingVisualErrLogged = _xiuiPendingVisualErrLogged or {};
+            local key = tostring(err);
+            if not _xiuiPendingVisualErrLogged[key] then
+                _xiuiPendingVisualErrLogged[key] = true;
+                print(chat.header('XIUI'):append(chat.error(
+                    'pendingVisualUpdate error: ' .. tostring(err))));
+            end
+        end
+    end
+
+    -- Render config menu FIRST, in its own pcall. Recovery path: if ANY module
+    -- is broken below, the menu still comes up so the user can locate and
+    -- disable the offender. configMenu.DrawWindow is a near no-op when the
+    -- menu is closed (showConfig[1] == false). Imgui z-order is independent
+    -- of draw order so the menu still appears on top of module windows.
+    do
+        local ok, err = pcall(configMenu.DrawWindow);
+        if not ok then
+            _xiuiConfigMenuErrLogged = _xiuiConfigMenuErrLogged or {};
+            local key = tostring(err);
+            if not _xiuiConfigMenuErrLogged[key] then
+                _xiuiConfigMenuErrLogged[key] = true;
+                print(chat.header('XIUI'):append(chat.error(
+                    'configMenu error: ' .. tostring(err))));
+            end
+        end
     end
 
     local eventSystemActive = gameState.GetEventSystemActive();
 
     if not gameState.ShouldHideUI(gConfig.hideDuringEvents, bLoggedIn) then
-        -- Sync treasure pool from memory (authoritative source of truth)
-        -- This ensures we never miss items, even if packets were dropped
+        -- Sync treasure pool from memory (authoritative source of truth).
+        -- Wrapped so a packet/memory edge case here can't gate module rendering.
         if gConfig.showNotifications then
-            notifications.SyncTreasurePoolFromMemory();
+            pcall(notifications.SyncTreasurePoolFromMemory);
             -- Check pending pool items - creates "Treasure Pool" notification if item
             -- hasn't been awarded (0x00D3) within 200ms of dropping (0x00D2)
-            notifications.CheckPendingPoolNotifications();
+            pcall(notifications.CheckPendingPoolNotifications);
         end
 
-        -- Render all registered modules
+        -- Render all registered modules. Each call is pcall-wrapped inside
+        -- uiModules.RenderModule (see core/moduleregistry.lua), so one broken
+        -- module no longer takes out the rest of the chain.
         for name, _ in pairs(uiModules.GetAll()) do
             uiModules.RenderModule(name, gConfig, gAdjustedSettings, eventSystemActive);
         end
-
-        configMenu.DrawWindow();
 
         -- Drive Treasure Pool preview from (config menu open AND Preview checked).
         -- This persists the checkbox across loads (the setting lives in gConfig)
         -- while only rendering mock items while the menu is open -- and clears
         -- automatically when the menu closes (showConfig[1] == false below).
         if treasurePool and treasurePool.SetPreview then
-            local wantPreview = (showConfig[1] == true) and (gConfig.treasurePoolPreview == true);
-            if treasurePool.IsPreviewActive() ~= wantPreview then
-                treasurePool.SetPreview(wantPreview);
-            end
+            pcall(function()
+                local wantPreview = (showConfig[1] == true) and (gConfig.treasurePoolPreview == true);
+                if treasurePool.IsPreviewActive() ~= wantPreview then
+                    treasurePool.SetPreview(wantPreview);
+                end
+            end);
         end
     else
-        uiModules.HideAll();
+        pcall(uiModules.HideAll);
     end
 
     -- XIUI DEV ONLY

@@ -19,4 +19,10 @@ modules.castcost = require('modules.castcost.init');
 modules.notifications = require('modules.notifications.init');
 modules.treasurepool = require('modules.treasurepool.init');
 
+-- Self-registering side-effect module (no Initialize/DrawWindow/etc.).
+-- Registers its own load/present/unload Ashita event callbacks under unique
+-- names. Assigned to the table only so it shows up in `modules` for inspection;
+-- the registry will skip it because it has no DrawWindow.
+modules.hideparty = require('modules.hideparty');
+
 return modules;

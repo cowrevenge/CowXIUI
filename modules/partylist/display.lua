@@ -116,6 +116,35 @@ local function drawOutlinedText(x, y, text, fillColor)
     dl:AddText({x, y}, fillU32, text);
 end
 
+-- Helper: shorten an FFXI zone name for the cramped partylist out-of-zone
+-- display. Rules (preserve the older XIUI behavior):
+--   1. Strip apostrophes first ("Ru'Hmet" -> "RuHmet").
+--   2. "X of Y" -> Y with internal spaces stripped
+--      ("Grand Palace of Hu'Xzoi" -> "HuXzoi").
+--   3. Two words -> first 2 chars of word 1 + word 2 concatenated
+--      ("Empyreal Paradox" -> "EmParadox").
+--   4. Three+ words -> first letter of each word except the last,
+--      then last word in full ("Lower Delkfutt's Tower" -> "LDTower").
+--   5. Single word / empty / fallback -> as-is.
+local function shortenZoneName(name)
+    if name == nil or name == '' then return ''; end
+    name = tostring(name):gsub("'", "");
+    local afterOf = name:match(".*%sof%s(.+)$");
+    if afterOf ~= nil then
+        return (afterOf:gsub("%s", ""));
+    end
+    local words = {};
+    for w in name:gmatch("%S+") do words[#words + 1] = w; end
+    if #words == 0 then return name; end
+    if #words == 1 then return words[1]; end
+    if #words == 2 then return words[1]:sub(1, 2) .. words[2]; end
+    local out = '';
+    for i = 1, #words - 1 do
+        out = out .. words[i]:sub(1, 1);
+    end
+    return out .. words[#words];
+end
+
 -- Draw the per-player alternating band for one entry. Called by every layout
 -- (0/1/2) with that layout's own row rectangle. The band tints the row
 -- background BEHIND the bars/text on the window draw list (imgui paints the
@@ -618,12 +647,15 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     -- after this branch regardless.
     if not memInfo.inzone then
         -- Out-of-zone: bar rows replaced with a solid black block; player name
-        -- + zone name overlay it. Entry height is unchanged so subsequent
-        -- members align vertically.
+        -- + abbreviated zone overlay it as a single line "Name (ShortZone)".
+        -- Entry height is unchanged so subsequent members align vertically.
         --
-        -- Draw order matches the in-zone path: BG block first, then text on
-        -- top. With SC_NAME_BAR_OVERLAP=10 the block starts close to entryTop
-        -- and would otherwise paint over the name if name drew first.
+        -- Zone abbreviation rules (matches older XIUI behavior):
+        --   "X of Y"           -> Y with apostrophes stripped
+        --                        ("Grand Palace of Hu'Xzoi" -> "HuXzoi")
+        --   "First Second ..."  -> first 2 chars of first word + rest joined
+        --                        ("Empyreal Paradox" -> "EmParadox")
+        --   single word         -> as-is
 
         -- (1) Black block over the bar-row area
         local barsTop    = hpStartY;
@@ -633,30 +665,28 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         local wDraw      = imgui.GetWindowDrawList();
         wDraw:AddRectFilled({hpStartX, barsTop}, {hpStartX + entryWidth, barsBottom}, fillCol);
 
-        -- (2) Zone name centered in the black block.
-        local zoneName = '';
+        -- (2) Resolve + abbreviate zone name via shared helper.
+        local zoneShort = '';
         if memInfo.zone and AshitaCore then
-            zoneName = AshitaCore:GetResourceManager():GetString('zones.names', memInfo.zone) or '';
+            local zoneName = AshitaCore:GetResourceManager():GetString('zones.names', memInfo.zone) or '';
+            zoneShort = shortenZoneName(zoneName);
         end
-        local zW, zH = imgui.CalcTextSize(zoneName);
-        drawOutlinedText(
-            hpStartX + (entryWidth - zW) / 2,
-            barsTop + (barsHeight - zH) / 2,
-            zoneName, {1, 1, 1, 1}
-        );
 
         -- (3) Leader / Alliance / Sync dots BEFORE the name so the name (added
         -- after this on the foreground list) covers any overlap.
         drawMemberDots();
 
-        -- (4) Player name LEFT-aligned at entryTop (same anchor as in-zone).
-        -- Drawn LAST so it overwrites the zone text wherever they overlap.
+        -- (4) "Name (ShortZone)" left-aligned on the name row.
         do
             local nameStr = tostring(memInfo.name or '');
             if #nameStr > 10 then
                 nameStr = nameStr:sub(1, 8) .. '..';
             end
-            drawOutlinedText(nameStartX, entryTop, nameStr, {1, 1, 1, 1});
+            local fullLine = nameStr;
+            if zoneShort ~= '' then
+                fullLine = fullLine .. ' (' .. zoneShort .. ')';
+            end
+            drawOutlinedText(nameStartX, entryTop, fullLine, {1, 1, 1, 1});
         end
 
         imgui.SetCursorScreenPos({hpStartX, entryTop + entryHeight});
@@ -1494,6 +1524,9 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         imgui.Dummy({zoneBarWidth, zoneBarHeight});
 
         local zoneName = encoding:ShiftJIS_To_UTF8(AshitaCore:GetResourceManager():GetString("zones.names", memInfo.zone), true);
+        -- Abbreviate to fit the cramped bar area; full names like
+        -- "Lower Delkfutt's Tower" overflow the HP+MP bar block.
+        zoneName = shortenZoneName(zoneName);
         -- The imgui window background sits over gdifont primitives and washes
         -- the zone name out. Draw it via imgui so it lands on top of the bg.
         -- Guarded: GetString can return nil for an unknown zone id, and

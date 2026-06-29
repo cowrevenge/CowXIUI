@@ -6,6 +6,50 @@ local progressbar = require('libs.progressbar');
 local buffTable = require('libs.bufftable');
 local castcostShared = require('modules.castcost.shared');
 
+-- Local imgui-based outlined text helper. Bars use imgui; gdifont primitives
+-- render BEFORE imgui in Ashita's pipeline and end up UNDER the bars - which
+-- prevents positioning text inside the bars. Drawing via the foreground draw
+-- list puts the text ON TOP of everything, so text-offset settings can move
+-- the labels inside the bar area without being covered.
+--
+-- argbIntToRgba converts the integer colors stored in gConfig (signed 32-bit
+-- ARGB, e.g. -16777216 == 0xFF000000) into {r,g,b,a} float tables that
+-- imgui.GetColorU32 expects.
+local function argbIntToRgba(c)
+    if c == nil then return {1, 1, 1, 1}; end
+    local a = bit.band(bit.rshift(c, 24), 0xFF) / 255;
+    local r = bit.band(bit.rshift(c, 16), 0xFF) / 255;
+    local g = bit.band(bit.rshift(c, 8),  0xFF) / 255;
+    local b = bit.band(c, 0xFF) / 255;
+    -- Treat 0 alpha as opaque (Ashita's color pickers sometimes save the
+    -- alpha byte stripped). Avoids invisible text after settings reset.
+    if a == 0 then a = 1; end
+    return {r, g, b, a};
+end
+
+local function drawOutlinedText(x, y, text, fillColor)
+    if text == nil or text == '' then return; end
+    text = tostring(text);
+    local dl = imgui.GetForegroundDrawList();
+    if dl == nil then return; end
+    local blackU32 = imgui.GetColorU32({0, 0, 0, 1});
+    local fillU32  = imgui.GetColorU32(fillColor or {1, 1, 1, 1});
+    dl:AddText({x - 1, y - 1}, blackU32, text);
+    dl:AddText({x + 1, y - 1}, blackU32, text);
+    dl:AddText({x - 1, y + 1}, blackU32, text);
+    dl:AddText({x + 1, y + 1}, blackU32, text);
+    dl:AddText({x, y}, fillU32, text);
+end
+
+-- Given an alignment anchor X and the text width, return the imgui-friendly
+-- top-left X (drawOutlinedText draws from top-left, not from an alignment
+-- anchor like gdifont).
+local function alignToLeftX(anchorX, textW, alignment)
+    if alignment == 'center' then return anchorX - textW / 2; end
+    if alignment == 'right'  then return anchorX - textW;     end
+    return anchorX;  -- left
+end
+
 local hpText;
 local mpText;
 local tpText;
@@ -429,21 +473,9 @@ playerbar.DrawWindow = function(settings)
 
 		imgui.SameLine();
 
-		-- Dynamically set font heights based on settings (avoids expensive font recreation)
-		hpText:set_font_height(settings.font_settings.font_height);
-		mpText:set_font_height(settings.font_settings.font_height);
-		tpText:set_font_height(settings.font_settings.font_height);
-
-		-- Calculate reference height for baseline alignment (only once per font height change)
-		-- Include all characters used in display modes: numbers, percent, parentheses, slash, space
-		if referenceTextHeight == 0 or referenceTextHeight ~= settings.font_settings.font_height then
-			hpText:set_text("0123456789%() /");
-			local _, refHeight = hpText:get_text_size();
-			referenceTextHeight = refHeight;
-		end
-
-		-- Update our HP Text (using proper padding like exp bar)
-		-- Format HP text based on display mode setting
+		-- Update our HP Text (drawn via imgui foreground draw list so it sits
+		-- ON TOP of the bars - the gdi primitive path renders under imgui
+		-- bars, which made text inside the bar invisible).
 		local hpDisplayMode = gConfig.playerBarHpDisplayMode or 'number';
 		local hpDisplayText;
 		if hpDisplayMode == 'percent' then
@@ -457,39 +489,26 @@ playerbar.DrawWindow = function(settings)
 		else
 			hpDisplayText = tostring(SelfHP);
 		end
-		hpText:set_text(hpDisplayText);
-		-- Apply baseline offset to keep text baseline consistent
-		local _, hpTextHeight = hpText:get_text_size();
-		local hpBaselineOffset = referenceTextHeight - hpTextHeight;
-		-- Calculate position based on alignment
-		local hpTextX;
+		local hpW, hpH = imgui.CalcTextSize(hpDisplayText);
+		local hpAnchorX;
 		local hpAlignment = gConfig.playerBarHpTextAlignment or 'right';
 		if hpAlignment == 'left' then
-			hpTextX = hpBarStartX + bookendWidth + textPadding;
-			hpText:set_font_alignment(gdi.Alignment.Left);
+			hpAnchorX = hpBarStartX + bookendWidth + textPadding;
 		elseif hpAlignment == 'center' then
-			hpTextX = hpBarStartX + (barSize / 2);
-			hpText:set_font_alignment(gdi.Alignment.Center);
-		else -- right alignment (default)
-			hpTextX = hpBarStartX + barSize - bookendWidth - textPadding;
-			hpText:set_font_alignment(gdi.Alignment.Right);
+			hpAnchorX = hpBarStartX + (barSize / 2);
+		else
+			hpAnchorX = hpBarStartX + barSize - bookendWidth - textPadding;
 		end
-		-- Apply user offset
-		hpTextX = hpTextX + (gConfig.playerBarHpTextOffsetX or 0);
+		hpAnchorX = hpAnchorX + (gConfig.playerBarHpTextOffsetX or 0);
+		local hpTextX = alignToLeftX(hpAnchorX, hpW, hpAlignment);
 		local hpTextY = hpBarStartY + settings.barHeight + settings.textYOffset + (gConfig.playerBarHpTextOffsetY or 0);
-		hpText:set_position_x(hpTextX);
-		hpText:set_position_y(hpTextY + hpBaselineOffset);
-		-- Only call set_font_color if the color has changed (expensive operation for GDI fonts)
-		if (lastHpTextColor ~= gConfig.colorCustomization.playerBar.hpTextColor) then
-			hpText:set_font_color(gConfig.colorCustomization.playerBar.hpTextColor);
-			lastHpTextColor = gConfig.colorCustomization.playerBar.hpTextColor;
-		end
+		drawOutlinedText(hpTextX, hpTextY, hpDisplayText,
+			argbIntToRgba(gConfig.colorCustomization.playerBar.hpTextColor));
 
-		hpText:set_visible(true);
+		-- Keep the gdi primitive hidden permanently; we draw via imgui above.
+		hpText:set_visible(false);
 
 		if (bShowMp) then
-			-- Update our MP Text (using proper padding like exp bar)
-			-- Format MP text based on display mode setting
 			local mpDisplayMode = gConfig.playerBarMpDisplayMode or 'number';
 			local mpDisplayText;
 			if mpDisplayMode == 'percent' then
@@ -503,68 +522,47 @@ playerbar.DrawWindow = function(settings)
 			else
 				mpDisplayText = tostring(SelfMP);
 			end
-			mpText:set_text(mpDisplayText);
-			-- Apply baseline offset to keep text baseline consistent
-			local _, mpTextHeight = mpText:get_text_size();
-			local mpBaselineOffset = referenceTextHeight - mpTextHeight;
-			-- Calculate position based on alignment
-			local mpTextX;
+			local mpW, _ = imgui.CalcTextSize(mpDisplayText);
+			local mpAnchorX;
 			local mpAlignment = gConfig.playerBarMpTextAlignment or 'right';
 			if mpAlignment == 'left' then
-				mpTextX = mpBarStartX + bookendWidth + textPadding;
-				mpText:set_font_alignment(gdi.Alignment.Left);
+				mpAnchorX = mpBarStartX + bookendWidth + textPadding;
 			elseif mpAlignment == 'center' then
-				mpTextX = mpBarStartX + (barSize / 2);
-				mpText:set_font_alignment(gdi.Alignment.Center);
-			else -- right alignment (default)
-				mpTextX = mpBarStartX + barSize - bookendWidth - textPadding;
-				mpText:set_font_alignment(gdi.Alignment.Right);
+				mpAnchorX = mpBarStartX + (barSize / 2);
+			else
+				mpAnchorX = mpBarStartX + barSize - bookendWidth - textPadding;
 			end
-			-- Apply user offset
-			mpTextX = mpTextX + (gConfig.playerBarMpTextOffsetX or 0);
+			mpAnchorX = mpAnchorX + (gConfig.playerBarMpTextOffsetX or 0);
+			local mpTextX = alignToLeftX(mpAnchorX, mpW, mpAlignment);
 			local mpTextY = mpBarStartY + settings.barHeight + settings.textYOffset + (gConfig.playerBarMpTextOffsetY or 0);
-			mpText:set_position_x(mpTextX);
-			mpText:set_position_y(mpTextY + mpBaselineOffset);
-			-- Only call set_font_color if the color has changed
-			if (lastMpTextColor ~= gConfig.colorCustomization.playerBar.mpTextColor) then
-				mpText:set_font_color(gConfig.colorCustomization.playerBar.mpTextColor);
-				lastMpTextColor = gConfig.colorCustomization.playerBar.mpTextColor;
-			end
+			drawOutlinedText(mpTextX, mpTextY, mpDisplayText,
+				argbIntToRgba(gConfig.colorCustomization.playerBar.mpTextColor));
 		end
 
-		mpText:set_visible(bShowMp);
+		-- gdi primitive stays hidden; imgui draws above (when bShowMp).
+		mpText:set_visible(false);
 
-		-- Update our TP Text (using proper padding like exp bar)
-		tpText:set_text(tostring(SelfTP));
-		-- Apply baseline offset to keep text baseline consistent
-		local _, tpTextHeight = tpText:get_text_size();
-		local tpBaselineOffset = referenceTextHeight - tpTextHeight;
-		-- Calculate position based on alignment
-		local tpTextX;
+		-- TP text (drawn via imgui above the bar).
+		local tpDisplayText = tostring(SelfTP);
+		local tpW, _ = imgui.CalcTextSize(tpDisplayText);
+		local tpAnchorX;
 		local tpAlignment = gConfig.playerBarTpTextAlignment or 'right';
 		if tpAlignment == 'left' then
-			tpTextX = tpBarStartX + bookendWidth + textPadding;
-			tpText:set_font_alignment(gdi.Alignment.Left);
+			tpAnchorX = tpBarStartX + bookendWidth + textPadding;
 		elseif tpAlignment == 'center' then
-			tpTextX = tpBarStartX + (barSize / 2);
-			tpText:set_font_alignment(gdi.Alignment.Center);
-		else -- right alignment (default)
-			tpTextX = tpBarStartX + barSize - bookendWidth - textPadding;
-			tpText:set_font_alignment(gdi.Alignment.Right);
+			tpAnchorX = tpBarStartX + (barSize / 2);
+		else
+			tpAnchorX = tpBarStartX + barSize - bookendWidth - textPadding;
 		end
-		-- Apply user offset
-		tpTextX = tpTextX + (gConfig.playerBarTpTextOffsetX or 0);
+		tpAnchorX = tpAnchorX + (gConfig.playerBarTpTextOffsetX or 0);
+		local tpTextX = alignToLeftX(tpAnchorX, tpW, tpAlignment);
 		local tpTextY = tpBarStartY + settings.barHeight + settings.textYOffset + (gConfig.playerBarTpTextOffsetY or 0);
-		tpText:set_position_x(tpTextX);
-		tpText:set_position_y(tpTextY + tpBaselineOffset);
-		local desiredTpColor = (SelfTP >= 1000) and gConfig.colorCustomization.playerBar.tpFullTextColor or gConfig.colorCustomization.playerBar.tpEmptyTextColor;
-		-- Only call set_font_color if the color has changed
-		if (lastTpTextColor ~= desiredTpColor) then
-			tpText:set_font_color(desiredTpColor);
-			lastTpTextColor = desiredTpColor;
-		end
+		local desiredTpColor = (SelfTP >= 1000)
+			and gConfig.colorCustomization.playerBar.tpFullTextColor
+			 or gConfig.colorCustomization.playerBar.tpEmptyTextColor;
+		drawOutlinedText(tpTextX, tpTextY, tpDisplayText, argbIntToRgba(desiredTpColor));
 
-		tpText:set_visible(true);
+		tpText:set_visible(false);
     end
 	imgui.End();
 end
