@@ -29,7 +29,7 @@
 
 addon.name      = 'XIUI';
 addon.author    = 'shadowcow (fork of XIUI by Team XIUI / tirem)';
-addon.version   = '1.6.23';
+addon.version   = '1.7';
 addon.desc      = 'HorizonXI UI suite: party/target/pet bars, pet buff HUD, click-to-cure party menus';
 addon.link      = 'https://github.com/tirem/XIUI'
 

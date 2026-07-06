@@ -3040,14 +3040,22 @@ function display.DrawCurrentTarget(settings)
                                   --            is NOT a reliable trigger.
     local FB_MENTOR_BIT  = 0x20;  -- GUESS      mentor icon - confirm with M-flagged target
 
-    -- Flags2 bits (Bazaar / GM Icon block):
+    -- Flags2 bits (Bazaar / GM / GMDev block):
     local F2_BAZAAR      = 0x00000200;  -- CONFIRMED  /bazaar item set up
-    local F2_GM_ICON     = 0x10000000;  -- CONFIRMED  GM icon (vanilla FFXI).
-                                        --            HorizonXI repurposes this
-                                        --            bit for their hardcore-mode
-                                        --            marker. Same flag, different
-                                        --            sprite art on HzXI. Confirmed
-                                        --            via Fru (hardcore: f2 +0x10000000).
+    -- HorizonXI staff detection - CONFIRMED via 4-way capture XOR:
+    --   Cow (self, no flags): Flags2 0xA0020001
+    --   Dwingvatt (random):   Flags2 0xA0020001
+    --   Gildas (GM, hard red): Flags2 0xA0023001  -> +0x3000 vs normal
+    --   Ceodon (GMDev, lt red): Flags2 0xA0023801 -> +0x3800 vs normal
+    -- The 0x1000 bit is set on BOTH staff and NEITHER normal player -> that's
+    -- the clean "is staff" discriminator. The 0x800 bit is set only on Ceodon
+    -- (GMDev), so it splits GMDev from plain GM.
+    local F2_STAFF       = 0x00001000;  -- CONFIRMED  set on GM and GMDev, not normals
+    local F2_GMDEV       = 0x00000800;  -- CONFIRMED  GMDev only (Ceodon), splits from GM
+
+    local isStaff = bit.band(entityRenderFlags2, F2_STAFF) ~= 0;
+    local isGMDev = isStaff and bit.band(entityRenderFlags2, F2_GMDEV) ~= 0;
+    local isGM    = isStaff and not isGMDev;
 
     -- Flags4 bits.
     --   F4_SYNC (0x00800000)    - Level Sync. CONFIRMED.
@@ -3068,9 +3076,9 @@ function display.DrawCurrentTarget(settings)
     local isAway       = bit.band(statusByte, FB_AWAY_BIT)    ~= 0;
     local isNameBlue   = bit.band(statusByte, FB_NAME_BLUE)   ~= 0;
     local isMentor     = bit.band(statusByte, FB_MENTOR_BIT)  ~= 0;
-    local isNew        = bit.band(entityRenderFlags4, F4_NEW_ADV) ~= 0;
+    local isNew        = bit.band(entityRenderFlags4, F4_NEW_ADV) ~= 0 and not isStaff;
     local hasBazaar    = bit.band(entityRenderFlags2, F2_BAZAAR) ~= 0;
-    local hasGmIcon    = bit.band(entityRenderFlags2, F2_GM_ICON) ~= 0;
+    local hasGmIcon    = isStaff;   -- GM or GMDev (see F2_STAFF above)
 
     -- Wire sync into the shared targetIsSynced flag (declared above before
     -- preview override). Preview already forces targetIsSynced=true.
@@ -3143,6 +3151,14 @@ function display.DrawCurrentTarget(settings)
         if isLFP then
             nameColor = {0.45, 0.70, 1.00, 1.0};
         end
+
+        -- Staff name colors (highest priority - override party/LFP blue).
+        -- Matches HorizonXI: GM = hard red, GMDev = lighter red/pink.
+        if isGM then
+            nameColor = {1.00, 0.20, 0.20, 1.0};   -- GM hard red
+        elseif isGMDev then
+            nameColor = {1.00, 0.50, 0.50, 1.0};   -- GMDev light red
+        end
     elseif isNPC then
         nameColor = {0.45, 0.95, 0.45, 1.0};   -- NPC green
     elseif isMob then
@@ -3181,10 +3197,18 @@ function display.DrawCurrentTarget(settings)
     --   - Mentor: untested, still a guess.
 
     local statusIconKey, statusIconLabel, statusIconColor = nil, nil, nil;
-    if isPC and hasGmIcon then
-        -- Vanilla FFXI: GM. HorizonXI: hardcore-mode marker (repurposed bit).
-        -- Highest priority since on retail this is the most important visual.
-        statusIconKey, statusIconLabel, statusIconColor = 'gm',     'GM',   {0.85, 0.40, 1.00, 1.0};
+    -- Link-dead (D/C) is the HIGHEST priority status: bit 0x10000000 in Flags1
+    -- (confirmed via Meenners D/C capture 0x1A800800 vs normal 0x0A000000).
+    -- Drawn even when LFP/Away/Bazaar/etc are also set.
+    local isLinkDead = isPC and bit.band(entityRenderFlags1, 0x10000000) ~= 0;
+    if isLinkDead then
+        statusIconKey, statusIconLabel, statusIconColor = 'lfp',  'D/C',   {0.60, 0.60, 0.60, 1.0};
+    elseif isPC and isGMDev then
+        -- HorizonXI GMDev (light red name). Distinct from plain GM.
+        statusIconKey, statusIconLabel, statusIconColor = 'gm',  'GMDev', {1.00, 0.50, 0.50, 1.0};
+    elseif isPC and isGM then
+        -- HorizonXI GM (hard red name).
+        statusIconKey, statusIconLabel, statusIconColor = 'gm',  'GM',    {1.00, 0.20, 0.20, 1.0};
     elseif isPC and isMentor then
         statusIconKey, statusIconLabel, statusIconColor = 'mentor', 'Mtr',  {1.00, 0.85, 0.30, 1.0};
     elseif isPC and isNew then
