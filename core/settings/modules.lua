@@ -688,6 +688,12 @@ function M.createModuleDefaults()
         bovinelatentSettings = T{
         },
 
+        -- settings for the Dedication tracker (bovinededication). Empty for
+        -- now; the module keeps its own volatile state. Present so the
+        -- registry can pass gAdjustedSettings[settingsKey] to Initialize.
+        bovinededicationSettings = T{
+        },
+
     };
 end
 

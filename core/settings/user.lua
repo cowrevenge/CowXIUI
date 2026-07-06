@@ -31,6 +31,8 @@ function M.createUserSettingsDefaults()
         showBovinelatent = true,
         bovinelatentHidden = false,
         bovinelatentRainbowOnFinish = true,
+        showBovinededication = true,
+        bovinededicationHidden = false,
 
         -- Treasure Pool settings
         treasurePoolEnabled = true,           -- Show treasure pool when items in pool

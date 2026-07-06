@@ -632,6 +632,11 @@ function M.DrawWindow(settings)
 
     refresh_weapon(false);
 
+    -- No trial weapon equipped -> nothing to show. Skip the window entirely
+    -- (Dedication tracker follows the same pattern -- window hidden when
+    -- there's no active context, tracker data persists in memory).
+    if not current_is_trial then return; end
+
     imgui.SetNextWindowSize({ 240, 0 }, ImGuiCond_FirstUseEver);
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0);
     imgui.PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0);
@@ -702,13 +707,6 @@ function M.DrawWindow(settings)
                 imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 1.0, 0.65, 1.0 });
                 imgui.Text(string.format('Total  %d', tot));
                 imgui.PopStyleColor();
-            end
-        else
-            imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 0.55, 0.60, 1.0 });
-            imgui.Text('No trial weapon equipped');
-            imgui.PopStyleColor();
-            if current_weapon ~= '' then
-                imgui.Text(current_weapon);
             end
         end
     end
