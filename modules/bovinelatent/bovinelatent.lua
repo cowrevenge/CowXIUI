@@ -42,6 +42,22 @@ local module_settings = nil;    -- gAdjustedSettings slice, from Initialize
 -- has already gone out; the flash keeps playing as long as the total stays
 -- at/above the threshold).
 local FINISH_THRESHOLD = 300;
+-- Per-weapon threshold overrides. These heavier trial weapons need 500
+-- points to break, per the horizonffxi wiki. Any weapon not listed here
+-- uses the default 300.
+local FINISH_THRESHOLD_BY_WEAPON = {
+    ['Destroyers']     = 500,
+    ['Coffinmaker']    = 500,
+    ['Expunger']       = 500,
+    ['Retributor']     = 500,
+    ['Subduer']        = 500,
+    ['Dissector']      = 500,
+    ['Heart Snatcher'] = 500,
+    ['Perforator']     = 500,
+};
+local function threshold_for(weapon)
+    return FINISH_THRESHOLD_BY_WEAPON[weapon] or FINISH_THRESHOLD;
+end
 local finished = {};            -- ['Dagger of Trials'] = true (echo fired)
 
 -- Chaosbringer trial: DRK weapon. Kill counter goes up by 1 when the player
@@ -179,7 +195,7 @@ end
 
 local function check_finish(weapon, c)
     if weapon == '' or c == nil then return; end
-    if total_points(c) < FINISH_THRESHOLD then return; end
+    if total_points(c) < threshold_for(weapon) then return; end
     if finished[weapon] == true then return; end
     finished[weapon] = true;
     -- Respect the "Rainbow Flash on Finish" checkbox for the echo too --
@@ -224,7 +240,12 @@ local function refresh_weapon(force)
     if not force and (now - weapon_checked_at) < 1.0 then return; end
     weapon_checked_at = now;
     current_weapon = read_equipped_weapon_name();
-    current_is_trial = current_weapon:lower():find('of trials', 1, true) ~= nil;
+    -- Trial filter: name contains "of Trials" (Dagger of Trials, Bow of
+    -- Trials, etc.) OR is one of the 500-pt named-weapon trials in the
+    -- threshold table (Destroyers, Coffinmaker, Perforator, etc.).
+    current_is_trial =
+        current_weapon:lower():find('of trials', 1, true) ~= nil
+        or FINISH_THRESHOLD_BY_WEAPON[current_weapon] ~= nil;
 end
 
 ---------------------------------------------------------------------
@@ -589,12 +610,13 @@ function M.GetTrials()
     local list = {};
     for weapon, c in pairs(trials) do
         list[#list + 1] = {
-            name  = weapon,
-            solo  = c.solo,
-            lvl1  = c.lvl1,
-            lvl2  = c.lvl2,
-            lvl3  = c.lvl3,
-            total = total_points(c),
+            name      = weapon,
+            solo      = c.solo,
+            lvl1      = c.lvl1,
+            lvl2      = c.lvl2,
+            lvl3      = c.lvl3,
+            total     = total_points(c),
+            threshold = threshold_for(weapon),
         };
     end
     table.sort(list, function(a, b) return a.name < b.name; end);
@@ -658,7 +680,8 @@ function M.DrawWindow(settings)
         if current_is_trial then
             local c = counts_for(current_weapon);
             local tot = total_points(c);
-            local is_finished = (tot >= FINISH_THRESHOLD);
+            local thr = threshold_for(current_weapon);
+            local is_finished = (tot >= thr);
 
             imgui.PushStyleColor(ImGuiCol_Text, { 0.85, 0.75, 1.0, 1.0 });
             imgui.Text(current_weapon);
@@ -701,11 +724,11 @@ function M.DrawWindow(settings)
                 elseif i == 4 then r,g,b = f, 0, 1;
                 else               r,g,b = 1, 0, q; end
                 imgui.PushStyleColor(ImGuiCol_Text, { r, g, b, 1.0 });
-                imgui.Text(string.format('Total  %d  (COMPLETE!)', tot));
+                imgui.Text(string.format('Total  %d / %d  (COMPLETE!)', tot, thr));
                 imgui.PopStyleColor();
             else
                 imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 1.0, 0.65, 1.0 });
-                imgui.Text(string.format('Total  %d', tot));
+                imgui.Text(string.format('Total  %d / %d', tot, thr));
                 imgui.PopStyleColor();
             end
         end

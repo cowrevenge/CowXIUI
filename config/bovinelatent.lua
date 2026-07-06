@@ -45,8 +45,9 @@ function M.DrawSettings()
                 local w = weapons[i];
                 imgui.Text(string.format('%s', w.name));
                 imgui.Text(string.format(
-                    '  Solo %d  Lv1 %d  Lv2 %d  Lv3 %d  Total %d',
-                    w.solo or 0, w.lvl1 or 0, w.lvl2 or 0, w.lvl3 or 0, w.total or 0));
+                    '  Solo %d  Lv1 %d  Lv2 %d  Lv3 %d  Total %d / %d',
+                    w.solo or 0, w.lvl1 or 0, w.lvl2 or 0, w.lvl3 or 0,
+                    w.total or 0, w.threshold or 300));
                 imgui.SameLine();
                 if imgui.Button('Reset##bovinelatent_reset_' .. tostring(i)) then
                     if tracker and type(tracker.ResetWeapon) == 'function' then
