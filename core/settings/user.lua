@@ -28,6 +28,9 @@ function M.createUserSettingsDefaults()
         showPetBar = true,
         showCastCost = true,
         showNotifications = true,
+        showBovinelatent = true,
+        bovinelatentHidden = false,
+        bovinelatentRainbowOnFinish = true,
 
         -- Treasure Pool settings
         treasurePoolEnabled = true,           -- Show treasure pool when items in pool

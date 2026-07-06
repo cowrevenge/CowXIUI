@@ -23,6 +23,7 @@ local castcostModule = require('config.castcost');
 local petbarModule = require('config.petbar');
 local notificationsModule = require('config.notifications');
 local treasurepoolModule = require('config.treasurepool');
+local bovinelatentModule = require('config.bovinelatent');
 local hidepartyModule = require('config.hideparty');
 
 local treasurePool = require('modules.treasurepool.init');
@@ -123,6 +124,7 @@ local categories = {
     { name = 'notifications', label = 'Notifications' },
     { name = 'hideparty', label = 'Hideparty' },
     { name = 'treasurePool', label = 'Treasure Pool' },
+    { name = 'bovinelatent', label = 'Latent Trial' },
 };
 
 -- Build state object for modules that need tab state
@@ -224,6 +226,10 @@ local function DrawTreasurePoolSettings()
     treasurepoolModule.DrawSettings();
 end
 
+local function DrawBovinelatentSettings()
+    bovinelatentModule.DrawSettings();
+end
+
 -- Color settings draw functions with state handling
 local function DrawGlobalColorSettings()
     globalModule.DrawColorSettings();
@@ -285,6 +291,10 @@ local function DrawTreasurePoolColorSettings()
     treasurepoolModule.DrawColorSettings();
 end
 
+local function DrawBovinelatentColorSettings()
+    bovinelatentModule.DrawColorSettings();
+end
+
 -- Dispatch tables for settings and color settings
 local settingsDrawFunctions = {
     DrawGlobalSettings,
@@ -301,6 +311,7 @@ local settingsDrawFunctions = {
     DrawNotificationsSettings,
     DrawHidepartySettings,
     DrawTreasurePoolSettings,
+    DrawBovinelatentSettings,
 };
 
 local colorSettingsDrawFunctions = {
@@ -318,6 +329,7 @@ local colorSettingsDrawFunctions = {
     DrawNotificationsColorSettings,
     DrawHidepartyColorSettings,
     DrawTreasurePoolColorSettings,
+    DrawBovinelatentColorSettings,
 };
 
 config.DrawWindow = function(us)

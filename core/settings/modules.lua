@@ -682,6 +682,12 @@ function M.createModuleDefaults()
             },
         },
 
+        -- settings for the latent trial tracker (bovinelatent). Empty for now;
+        -- the module keeps its own JSON state. Present so the registry has
+        -- something to pass as gAdjustedSettings[settingsKey] to Initialize.
+        bovinelatentSettings = T{
+        },
+
     };
 end
 

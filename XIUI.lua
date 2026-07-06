@@ -67,6 +67,7 @@ local petBar = uiMods.petbar;
 local castCost = uiMods.castcost;
 local notifications = uiMods.notifications;
 local treasurePool = uiMods.treasurepool;
+local bovinelatent = uiMods.bovinelatent;
 local configMenu = require('config');
 local debuffHandler = require('handlers.debuffhandler');
 local petBuffHandler = require('handlers.petbuffhandler');
@@ -241,6 +242,12 @@ uiModules.Register('treasurePool', {
     module = treasurePool,
     settingsKey = 'treasurePoolSettings',
     configKey = 'treasurePoolEnabled',
+    hasSetHidden = true,
+});
+uiModules.Register('bovinelatent', {
+    module = bovinelatent,
+    settingsKey = 'bovinelatentSettings',
+    configKey = 'showBovinelatent',
     hasSetHidden = true,
 });
 
