@@ -68,6 +68,7 @@ local castCost = uiMods.castcost;
 local notifications = uiMods.notifications;
 local treasurePool = uiMods.treasurepool;
 local bovinelatent = uiMods.bovinelatent;
+local bovinededication = uiMods.bovinededication;
 local configMenu = require('config');
 local debuffHandler = require('handlers.debuffhandler');
 local petBuffHandler = require('handlers.petbuffhandler');
@@ -248,6 +249,12 @@ uiModules.Register('bovinelatent', {
     module = bovinelatent,
     settingsKey = 'bovinelatentSettings',
     configKey = 'showBovinelatent',
+    hasSetHidden = true,
+});
+uiModules.Register('bovinededication', {
+    module = bovinededication,
+    settingsKey = 'bovinededicationSettings',
+    configKey = 'showBovinededication',
     hasSetHidden = true,
 });
 

@@ -7,8 +7,10 @@
 * Detection chain (all match on chat lines from text_in):
 *   1. "<Name> uses <Item>."  -- capture the item (must be one of our table
 *      entries). Stash as last_item.
-*   2. "<Name> gains the effect of Dedication."  -- arm active tracking:
-*      bonus_used = 0, bonus_cap = table.cap_exp, bonus_pct = table.bonus.
+*   2. Dedication buff (id 249) appears in the player's buff array within
+*      30s of the item use -- proof the item ACTIVATED. Commit it as the
+*      tracked buff: bonus_used = 0, cap/pct from the table. No buff edge
+*      within 30s = the item failed (already had the effect) -- discard.
 *   3. "<Name> gains N experience points."  -- increment bonus_used by
 *      floor(N * (bonus_pct / (100 + bonus_pct))), i.e. the extra portion
 *      the buff added on top of base XP. When bonus_used >= bonus_cap the
@@ -29,7 +31,10 @@ local M = {};
 -- EXP BUFF TABLE (HorizonFFXI EXP Buff Reference Sheet)
 ---------------------------------------------------------------------
 
--- Keyed by exact item name as it appears in the "<Name> uses <Item>." line.
+-- Canonical names (as shown on the wiki / item info screen). The chat log
+-- lower-cases these and prefixes an article ("Cowrevenge uses an Emperor
+-- band."), so match happens against BUFF_LOOKUP below, keyed by the
+-- lowercase item text without the leading "a/an/the".
 local EXP_BUFFS = {
     ['Empress Band']                 = { bonus = 50,  duration_min = 180,  cap_exp = 1000  },
     ['Emperor Band']                 = { bonus = 75,  duration_min = 150,  cap_exp = 2250  },
@@ -38,6 +43,25 @@ local EXP_BUFFS = {
     ['Anniversary Ring']             = { bonus = 100, duration_min = 720,  cap_exp = 3000  },
 };
 
+-- Lowercase lookup, indexed by the exact form the chat log emits.
+local BUFF_LOOKUP = {};
+for name, data in pairs(EXP_BUFFS) do
+    BUFF_LOOKUP[name:lower()] = { canonical = name, data = data };
+end
+
+-- Resolve whatever the chat line captured to a canonical buff entry.
+-- Strips a leading article ("a", "an", "the"), lower-cases, and looks up.
+-- Returns nil if it isn't one of our tracked items.
+local function resolve_buff(item_text)
+    if type(item_text) ~= 'string' or item_text == '' then return nil; end
+    local s = item_text:lower();
+    -- Strip a leading article + single space.
+    s = s:gsub('^a ', ''):gsub('^an ', ''):gsub('^the ', '');
+    local hit = BUFF_LOOKUP[s];
+    if hit then return hit; end
+    return nil;
+end
+
 ---------------------------------------------------------------------
 -- STATE
 ---------------------------------------------------------------------
@@ -45,8 +69,8 @@ local EXP_BUFFS = {
 local hidden = false;
 local text_event_registered = false;
 
--- Pending item state: the last EXP-buff item the player USED but hasn't yet
--- produced a "gains the effect of Dedication" line for. Cleared on effect
+-- Pending item state: the last EXP-buff item the player USED but whose
+-- Dedication buff hasn't appeared in the buff array yet. Cleared on effect
 -- gained (rolled into tracked_*), on a wear-off followed by a fresh item
 -- use, and on Reset.
 local last_item      = '';          -- most recent EXP item name the player used
@@ -64,16 +88,21 @@ local tracked_cap    = 0;
 local bonus_used     = 0;           -- bonus EXP consumed so far
 
 -- Just a visibility signal. TRUE while the player has the Dedication effect
--- (between "gains the effect of Dedication" and "wears off"). Doesn't gate
+-- (mirrors the buff array read each frame). Doesn't gate
 -- counting -- counting keys off tracked_item ~= '' -- so a wear-off just
 -- hides the window without dropping the state.
 local effect_up      = false;
 
+-- Edge detector: buff state last frame. A false->true transition within
+-- ITEM_ACTIVATE_WINDOW_SEC of an item use = that item activated.
+local had_dedication = false;
+
 local escaped_name   = '';          -- cached pattern-escaped player name
 
--- Time window between "player uses X" and "player gains the effect of
--- Dedication" -- the game emits both back-to-back, but keep this generous.
-local USE_TO_EFFECT_SEC = 5.0;
+-- Activation window: after "player uses <item>", the Dedication buff must
+-- appear within this long or the item is judged to have FAILED (already
+-- had the effect, item on cooldown, etc.) and the pending use is dropped.
+local ITEM_ACTIVATE_WINDOW_SEC = 30.0;
 
 ---------------------------------------------------------------------
 -- HELPERS
@@ -81,6 +110,29 @@ local USE_TO_EFFECT_SEC = 5.0;
 
 local function now_sec()
     return os.clock();
+end
+
+-- Dedication buff id (from horizonffxi status list). Reading the player
+-- buff array directly beats scraping chat -- text lines localize / vary,
+-- IDs don't. effect_up flips on the presence of this id, not on chat.
+local DEDICATION_BUFF_ID = 249;
+
+local function player_has_dedication()
+    local ok, has = pcall(function()
+        local buffs = AshitaCore:GetMemoryManager():GetPlayer():GetBuffs();
+        -- IMPORTANT (from general.lua's own buff scan): GetBuffs() returns a
+        -- userdata-with-metamethods, NOT a Lua table. A type(buffs)=='table'
+        -- check FAILS on it -- do not type-check, just index. Cover both
+        -- index bases (0..32).
+        for i = 0, 32 do
+            local v = tonumber(buffs[i]);
+            if v ~= nil and math.floor(v + 0.5) == DEDICATION_BUFF_ID then
+                return true;
+            end
+        end
+        return false;
+    end);
+    return ok and has == true;
 end
 
 local function pattern_escape_name(name)
@@ -109,6 +161,7 @@ local function clear_all()
     tracked_cap   = 0;
     bonus_used    = 0;
     effect_up     = false;
+    had_dedication = false;
 end
 
 ---------------------------------------------------------------------
@@ -133,41 +186,24 @@ local function on_text_in(e)
     --    is already up and the player tries to use another band, the game
     --    refuses to stack -- if no new "gains the effect" line follows,
     --    tracked_* stays as it was.
+    --
+    --    Chat log form is "<Name> uses an emperor band." -- lowercase, with
+    --    an article. resolve_buff strips both to look up canonical entry.
     local item = text:match('^' .. escaped_name .. ' uses (.-)%.');
     if item then
-        local buff = EXP_BUFFS[item];
-        if buff then
-            last_item     = item;
+        local hit = resolve_buff(item);
+        if hit then
+            last_item     = hit.canonical;
             last_item_at  = now;
-            last_item_pct = buff.bonus;
-            last_item_cap = buff.cap_exp;
+            last_item_pct = hit.data.bonus;
+            last_item_cap = hit.data.cap_exp;
         end
         return;
     end
 
-    -- 2. Effect gained. If we saw an EXP item use within the arming window,
-    --    a fresh Dedication is starting. THIS is the only automatic reset
-    --    path -- roll last_item into tracked_*, zero the bonus counter,
-    --    mark the effect up.
-    --
-    --    If there's no pending item (party member's aura, whatever), leave
-    --    the tracker alone -- flip effect_up so the window shows the
-    --    prior data, but don't zero it.
-    if text:match('^' .. escaped_name .. ' gains the effect of Dedication%.') then
-        if last_item ~= '' and (now - last_item_at) <= USE_TO_EFFECT_SEC then
-            tracked_item = last_item;
-            tracked_pct  = last_item_pct;
-            tracked_cap  = last_item_cap;
-            bonus_used   = 0;
-            last_item    = '';        -- consumed
-            last_item_at = 0.0;
-        end
-        effect_up = true;
-        return;
-    end
-
-    -- 3. XP gain. Only accumulate if we actually have a tracked buff.
-    if tracked_item ~= '' and effect_up then
+    -- XP gain. Only accumulate while the Dedication buff is actually up
+    --    (read from the buff array) and we know which item it came from.
+    if tracked_item ~= '' and player_has_dedication() then
         local xp = tonumber(text:match('^' .. escaped_name .. ' gains (%d+) experience points?%.'));
         if xp and xp > 0 then
             -- Total XP after buff = base + base * pct/100 = base * (100+pct)/100
@@ -181,13 +217,6 @@ local function on_text_in(e)
         end
     end
 
-    -- 4. Effect wears off. Hide the window but PRESERVE the tracker so a
-    --    zoning / relog / lag hiccup doesn't nuke context. State only
-    --    changes again on a fresh item-use + Dedication-gain pair.
-    if text:match('effect of Dedication wears off') then
-        effect_up = false;
-        return;
-    end
 end
 
 ---------------------------------------------------------------------
@@ -199,6 +228,7 @@ function M.Initialize(settings)
         ashita.events.register('text_in', 'bovinededication_text_in', on_text_in);
         text_event_registered = true;
     end
+    print('[dedication] initialized (registry) -- text handler registered.');
 end
 
 function M.UpdateVisuals(settings) end
@@ -207,6 +237,73 @@ function M.SetHidden(state) hidden = (state == true); end
 -- Config menu Reset button hook. Wipes both pending and tracked state.
 function M.Reset()
     clear_all();
+end
+
+-- Config menu Force buttons: seed the tracker as if the player had used
+-- this item and gotten the Dedication effect. Used when the chat-line
+-- detection misses (item wasn't tracked from this session, wear-off caught
+-- offline, addon loaded mid-buff, etc.). Manual override -- no chat
+-- detection required.
+function M.ForceItem(name)
+    if type(name) ~= 'string' or name == '' then return; end
+    -- Force only makes sense while the Dedication buff is actually up --
+    -- it tells the tracker WHICH item the current effect came from. No
+    -- buff = nothing to attribute = no-op (with a local debug print so the
+    -- click always visibly reports what happened).
+    if not player_has_dedication() then
+        print('[dedication] Force failed: no Dedication buff (id ' .. tostring(DEDICATION_BUFF_ID) .. ') found on player.');
+        return;
+    end
+    local hit = resolve_buff(name);
+    if not hit then
+        print('[dedication] Force failed: unknown item "' .. tostring(name) .. '".');
+        return;
+    end
+    last_item     = '';
+    last_item_at  = 0.0;
+    tracked_item  = hit.canonical;
+    tracked_pct   = hit.data.bonus;
+    tracked_cap   = hit.data.cap_exp;
+    bonus_used    = 0;
+    effect_up     = true;
+    print('[dedication] Forced: ' .. hit.canonical .. ' (+' .. hit.data.bonus .. '%, cap ' .. hit.data.cap_exp .. ').');
+end
+
+-- Config panel status readout: current tracker state regardless of the
+-- window's visibility (Hidden Window still allows checking here).
+function M.GetStatus()
+    return {
+        item      = tracked_item,
+        pct       = tracked_pct,
+        cap       = tracked_cap,
+        used      = bonus_used,
+        remaining = math.max(0, (tracked_cap or 0) - (bonus_used or 0)),
+        buff_up   = player_has_dedication(),
+    };
+end
+
+-- Debug dump: prints every visibility/tracking gate so a "no window" report
+-- pinpoints the failing gate in one click.
+function M.Debug()
+    local age = now_sec() - last_draw_at;
+    print(string.format('[dedication] DrawWindow called: %s (%.1fs ago)',
+        last_draw_at > 0 and 'YES' or 'NEVER', last_draw_at > 0 and age or 0));
+    print(string.format('[dedication] init/text handler: %s', tostring(text_event_registered)));
+    print(string.format('[dedication] buff(249) present: %s', tostring(player_has_dedication())));
+    print(string.format('[dedication] hidden(SetHidden): %s', tostring(hidden)));
+    local cfg = rawget(_G, 'gConfig');
+    print(string.format('[dedication] cfg hiddenWindow: %s  enabled: %s',
+        tostring(cfg and cfg.bovinededicationHidden), tostring(cfg and cfg.showBovinededication)));
+    print(string.format('[dedication] tracked: "%s"  pct: %d  cap: %d  used: %d',
+        tostring(tracked_item), tracked_pct or 0, tracked_cap or 0, bonus_used or 0));
+end
+
+-- Config menu list source: canonical item names sorted for display.
+function M.GetBuffNames()
+    local list = {};
+    for name, _ in pairs(EXP_BUFFS) do list[#list + 1] = name; end
+    table.sort(list);
+    return list;
 end
 
 function M.Cleanup()
@@ -220,12 +317,41 @@ end
 -- GUI
 ---------------------------------------------------------------------
 
+local last_draw_at = 0.0;   -- stamped every DrawWindow entry (Debug reports age)
+
 function M.DrawWindow(settings)
+    -- State maintenance runs BEFORE any visibility early-return so pending
+    -- commits and expiry keep working while the window is hidden.
+    local has = player_has_dedication();
+    local tnow = now_sec();
+    last_draw_at = tnow;
+
+    -- Buff EDGE (false -> true): Dedication just appeared. If an EXP item
+    -- was used within the activation window, that item ACTIVATED -- commit
+    -- it as the tracked buff with a fresh counter. This is the proof the
+    -- item worked; no edge within the window = the item failed (already
+    -- had the effect, etc.) and the pending use expires below.
+    if has and not had_dedication then
+        if last_item ~= '' and (tnow - last_item_at) <= ITEM_ACTIVATE_WINDOW_SEC then
+            tracked_item = last_item;
+            tracked_pct  = last_item_pct;
+            tracked_cap  = last_item_cap;
+            bonus_used   = 0;
+            last_item    = '';
+            last_item_at = 0.0;
+        end
+    end
+    had_dedication = has;
+
+    -- Pending expiry: no activation within the window -> item failed.
+    if last_item ~= '' and (tnow - last_item_at) > ITEM_ACTIVATE_WINDOW_SEC then
+        last_item    = '';
+        last_item_at = 0.0;
+    end
+
+    effect_up = has;
+
     if hidden then return; end
-    -- Visibility: window only while the Dedication effect is up. Wearing
-    -- off / zoning / relogging hides the window but the tracker's numbers
-    -- persist -- next time the effect comes back (or Reset is pressed)
-    -- they'll be right where you left them.
     if not effect_up then return; end
     if tracked_item == '' then return; end
 
