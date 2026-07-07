@@ -31,6 +31,7 @@ function M.createUserSettingsDefaults()
         showBovinelatent = true,
         bovinelatentHidden = false,
         bovinelatentRainbowOnFinish = true,
+        bovinelatentExperimental = false,
         showBovinededication = true,
         bovinededicationHidden = false,
 

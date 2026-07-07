@@ -37,6 +37,18 @@ local packet_event_registered = false;
 
 local module_settings = nil;    -- gAdjustedSettings slice, from Initialize
 
+-- Pause: freeze all counting. Both WS packet and Chaosbringer text handlers
+-- return early. Doesn't clear state -- unpausing resumes tracking cleanly.
+local paused = false;
+
+-- Experimental Mode: WS points earned on a mob are HELD in a buffer keyed
+-- by the mob's target name, and only committed to the running counter if
+-- the mob is subsequently defeated with an XP grant. A defeat with no XP
+-- (grey mob, capped, etc.) discards the buffered points. Entries older
+-- than EXPERIMENTAL_TTL_SEC also drop.
+local experimental_pending = {};   -- [mob_name] = { weapon, solo, lvl1, lvl2, lvl3, at }
+local EXPERIMENTAL_TTL_SEC = 30.0;
+
 -- Trial completion. Once a weapon's total reaches this, we fire the flash
 -- and echo, one time only per weapon (finished[name] = true means the echo
 -- has already gone out; the flash keeps playing as long as the total stays
@@ -433,6 +445,8 @@ local function on_text_in(e)
     local raw = e.message;
     if type(raw) ~= 'string' or #raw == 0 then return; end
 
+    if paused then return; end
+
     ensure_player_name_cached();
     if escaped_name == '' then return; end
 
@@ -478,25 +492,85 @@ local function on_text_in(e)
             pending_kill_weapon = entry.weapon;
         end
         last_melee_hit[defeated] = nil;
+
+        -- Experimental Mode: mark this mob's buffered WS points as pending
+        -- commit. The XP line below will commit them; no XP line (grey con,
+        -- level-capped, etc.) means the entry expires unclaimed and gets
+        -- pruned. Deleted right on defeat if there was no buffer -- fast
+        -- path for kills where the player didn't WS this mob.
+        if experimental_pending[defeated] then
+            experimental_pending[defeated].defeated_at = now;
+        end
         return;
     end
 
-    -- XP grant: "<Name> gains N experience points." -- the third gate.
-    -- Chaosbringer wiki notes trials require XP-yielding kills, so a mob
-    -- that grants nothing (grey con, capped, mission-locked) shouldn't
-    -- count and won't produce this line.
-    if pending_kill_at > 0 and (now - pending_kill_at) <= XP_WINDOW_SEC then
-        if text:match('^' .. escaped_name .. ' gains %d+ experience points?%.') then
+    -- XP grant: "<Name> gains N experience points." -- Chaosbringer's third
+    -- gate AND the Experimental commit gate. A mob that grants nothing
+    -- (grey con, capped, mission-locked) doesn't emit this line, so both
+    -- Chaosbringer credit and Experimental buffer discard cleanly.
+    if text:match('^' .. escaped_name .. ' gains %d+ experience points?%.') then
+        -- Chaosbringer commit.
+        if pending_kill_at > 0 and (now - pending_kill_at) <= XP_WINDOW_SEC then
             pending_kill_at = 0.0;
             pending_kill_mob = '';
             pending_kill_weapon = '';
             credit_chaos_kill();
+        end
+
+        -- Experimental commit: find any pending mob whose defeat we saw
+        -- within the XP window and commit its buffered WS points to the
+        -- weapon's running counter. Multiple mobs could be pending (party
+        -- kill spillover), so commit them all -- the game only emits XP
+        -- when it's OUR kill.
+        for mob, entry in pairs(experimental_pending) do
+            if entry.defeated_at and (now - entry.defeated_at) <= XP_WINDOW_SEC then
+                local c = counts_for(entry.weapon);
+                c.solo = (c.solo or 0) + (entry.solo or 0);
+                c.lvl1 = (c.lvl1 or 0) + (entry.lvl1 or 0);
+                c.lvl2 = (c.lvl2 or 0) + (entry.lvl2 or 0);
+                c.lvl3 = (c.lvl3 or 0) + (entry.lvl3 or 0);
+                experimental_pending[mob] = nil;
+                save_trials();
+                check_finish(entry.weapon, c);
+            end
+        end
+        return;
+    end
+end
+
+-- Look up a mob's display name from its server id by scanning the entity
+-- table. Returns '' if not found. Used by Experimental Mode to bridge the
+-- action packet (server id) to the text lines (name).
+local function entity_name_by_server_id(server_id)
+    if not server_id or server_id == 0 then return ''; end
+    local ok, name = pcall(function()
+        local ent = AshitaCore:GetMemoryManager():GetEntity();
+        if not ent then return ''; end
+        for i = 0, 2303 do
+            if ent:GetServerId(i) == server_id then
+                return tostring(ent:GetName(i) or '');
+            end
+        end
+        return '';
+    end);
+    if ok and type(name) == 'string' then return name; end
+    return '';
+end
+
+-- Prune stale Experimental buffer entries so a mob that was hit with a WS
+-- but never defeated (fled, despawned, party wiped) doesn't sit around.
+local function prune_experimental(now)
+    for mob, entry in pairs(experimental_pending) do
+        if (now - (entry.at or 0)) > EXPERIMENTAL_TTL_SEC then
+            experimental_pending[mob] = nil;
         end
     end
 end
 
 local function on_packet_in(e)
     if e.id ~= 0x28 then return; end
+
+    if paused then return; end
 
     -- Quick type check before a full parse: type 3 = Weapon Skill finish.
     local ptype = ashita.bits.unpack_be(e.data_raw, 0, 82, 4);
@@ -515,8 +589,6 @@ local function on_packet_in(e)
     refresh_weapon(true);
     if not current_is_trial then return; end
 
-    local c = counts_for(current_weapon);
-
     local level = 0;
     local add = pkt.Action.AdditionalEffect;
     if add ~= nil and add.Damage ~= nil then
@@ -526,6 +598,29 @@ local function on_packet_in(e)
         end
     end
 
+    -- Experimental Mode: don't touch the running counter. Buffer the points
+    -- against the target mob's name; commit later on defeat + XP grant, or
+    -- discard if the defeat brings no XP.
+    local cfg = rawget(_G, 'gConfig');
+    if cfg and cfg.bovinelatentExperimental == true then
+        local mob_name = entity_name_by_server_id(pkt.TargetId);
+        if mob_name == '' then return; end
+        local pend = experimental_pending[mob_name];
+        if pend == nil or pend.weapon ~= current_weapon then
+            pend = { weapon = current_weapon, solo = 0, lvl1 = 0, lvl2 = 0, lvl3 = 0 };
+            experimental_pending[mob_name] = pend;
+        end
+        pend.at = now_sec();
+        if     level >= 3 then pend.lvl3 = pend.lvl3 + 1;
+        elseif level == 2 then pend.lvl2 = pend.lvl2 + 1;
+        elseif level == 1 then pend.lvl1 = pend.lvl1 + 1;
+        else                    pend.solo = pend.solo + 1; end
+        prune_experimental(now_sec());
+        return;
+    end
+
+    -- Normal mode: apply immediately.
+    local c = counts_for(current_weapon);
     if level >= 3 then
         c.lvl3 = c.lvl3 + 1;
     elseif level == 2 then
@@ -634,6 +729,11 @@ function M.ResetChaosbringer()
     save_trials();
 end
 
+-- Pause / Resume hooks so the config menu can drive them too.
+function M.IsPaused() return paused == true; end
+function M.SetPaused(state) paused = (state == true); end
+function M.TogglePaused() paused = not paused; end
+
 function M.AddChaosbringerKills(count)
     local n = tonumber(count) or 0;
     if n <= 0 then return; end
@@ -686,6 +786,21 @@ function M.DrawWindow(settings)
             imgui.PushStyleColor(ImGuiCol_Text, { 0.85, 0.75, 1.0, 1.0 });
             imgui.Text(current_weapon);
             imgui.PopStyleColor();
+
+            -- Pause / Resume: freezes both the WS packet counter and the
+            -- Chaosbringer text handler. State is preserved -- resume
+            -- picks up where it left off.
+            local pause_label = paused and 'Resume##bovinelatent_pause' or 'Pause##bovinelatent_pause';
+            if imgui.Button(pause_label) then
+                paused = not paused;
+            end
+            if paused then
+                imgui.SameLine();
+                imgui.PushStyleColor(ImGuiCol_Text, { 1.0, 0.7, 0.3, 1.0 });
+                imgui.Text('(PAUSED)');
+                imgui.PopStyleColor();
+            end
+
             imgui.Separator();
 
             local function row(label, count, pts)

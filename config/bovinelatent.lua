@@ -21,6 +21,8 @@ function M.DrawSettings()
     imgui.ShowHelp('When on, the tracker window stays hidden even with a trial weapon equipped.');
     components.DrawCheckbox('Rainbow Flash on Finish', 'bovinelatentRainbowOnFinish', CheckVisibility);
     imgui.ShowHelp('Flash the window in rainbow colors and echo a completion message on trial milestones.');
+    components.DrawCheckbox('Experimental Mode', 'bovinelatentExperimental', CheckVisibility);
+    imgui.ShowHelp('Buffer WS points against each mob and only commit them if the mob dies AND grants XP. Filters out no-XP kills (grey cons, capped, mission mobs).');
 
     if components.CollapsingSection('WeaponSkill trials##bovinelatent') then
         imgui.Text('Solo WS         1 pt');
