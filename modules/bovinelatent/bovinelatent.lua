@@ -439,21 +439,9 @@ local function credit_chaos_kill()
     check_chaos_milestones();
 end
 
-local function on_text_in(e)
-    -- Only look at rendered mode (final display text). e.mode filters the
-    -- lower-half chat modes; keep it broad and match on text instead.
-    local raw = e.message;
-    if type(raw) ~= 'string' or #raw == 0 then return; end
-
-    if paused then return; end
-
-    ensure_player_name_cached();
-    if escaped_name == '' then return; end
-
-    -- Strip Ashita/FFXI auto-translate + color escape bytes so patterns work
-    -- against clean text.
-    local text = raw:gsub('\x1E.', ''):gsub('\x1F.', '');
+local function handle_line(text)
     local now = now_sec();
+    text = text:gsub('^%[[%d:]+%]%s*', '');
 
     prune_melee_credits(now);
 
@@ -535,6 +523,25 @@ local function on_text_in(e)
             end
         end
         return;
+    end
+end
+
+-- text_in entry point. Splits the raw message on FFXI's in-message line
+-- separator (0x07) and real newlines before matching -- the game PACKS
+-- multiple display lines into one message ("EXP chain #2!\x07<Name> gains
+-- 225 experience points.") and anchored patterns fail on the packed form.
+local function on_text_in(e)
+    local raw = e.message;
+    if type(raw) ~= 'string' or #raw == 0 then return; end
+
+    if paused then return; end
+
+    ensure_player_name_cached();
+    if escaped_name == '' then return; end
+
+    local cleaned = raw:gsub('\x1E.', ''):gsub('\x1F.', '');
+    for line in cleaned:gmatch('[^\x07\r\n]+') do
+        handle_line(line);
     end
 end
 

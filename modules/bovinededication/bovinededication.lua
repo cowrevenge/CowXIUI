@@ -135,6 +135,22 @@ local function player_has_dedication()
     return ok and has == true;
 end
 
+-- Debounced buff state. During login / zoning the player object briefly
+-- reads no buffs -- a raw false there must not be treated as "Dedication
+-- ended". A raw TRUE is instant; a raw FALSE only counts as really-gone
+-- after it has stayed false past the grace window. NOTHING wipes tracker
+-- state on buff loss either way -- visibility and counting just pause.
+local DEDICATION_GRACE_SEC = 5.0;
+local buff_true_at = 0.0;
+
+local function dedication_up()
+    if player_has_dedication() then
+        buff_true_at = now_sec();
+        return true;
+    end
+    return buff_true_at > 0 and (now_sec() - buff_true_at) <= DEDICATION_GRACE_SEC;
+end
+
 local function pattern_escape_name(name)
     return (name or ''):gsub('([^%w])', '%%%1');
 end
@@ -165,19 +181,46 @@ local function clear_all()
 end
 
 ---------------------------------------------------------------------
+-- PERSISTENCE -- tracker survives /addon reload, logout, crash. The
+-- Dedication buff itself persists through logout server-side, so the
+-- counter must too. modules/bovinededication/dedication_state.json.
+---------------------------------------------------------------------
+
+local function state_file_path()
+    return addon.path .. 'modules/bovinededication/dedication_state.json';
+end
+
+local function save_state()
+    local f = io.open(state_file_path(), 'w');
+    if not f then return; end
+    f:write(string.format(
+        '{ "item": "%s", "pct": %d, "cap": %d, "used": %d }\r\n',
+        tostring(tracked_item):gsub('\\', '\\\\'):gsub('"', '\\"'),
+        tracked_pct or 0, tracked_cap or 0, bonus_used or 0));
+    f:close();
+end
+
+local function load_state()
+    local f = io.open(state_file_path(), 'r');
+    if not f then return; end
+    local text = f:read('*a') or '';
+    f:close();
+    local item = text:match('"item"%s*:%s*"([^"]*)"');
+    if item ~= nil and item ~= '' then
+        tracked_item = item:gsub('\\"', '"'):gsub('\\\\', '\\');
+        tracked_pct  = tonumber(text:match('"pct"%s*:%s*(%d+)'))  or 0;
+        tracked_cap  = tonumber(text:match('"cap"%s*:%s*(%d+)'))  or 0;
+        bonus_used   = tonumber(text:match('"used"%s*:%s*(%d+)')) or 0;
+    end
+end
+
+---------------------------------------------------------------------
 -- TEXT HANDLER
 ---------------------------------------------------------------------
 
-local function on_text_in(e)
-    local raw = e.message;
-    if type(raw) ~= 'string' or #raw == 0 then return; end
-
-    ensure_player_name_cached();
-    if escaped_name == '' then return; end
-
-    -- Strip auto-translate + color escape bytes.
-    local text = raw:gsub('\x1E.', ''):gsub('\x1F.', '');
+local function handle_line(text)
     local now = now_sec();
+    text = text:gsub('^%[[%d:]+%]%s*', '');
 
     -- 1. Player uses an item. Only stash if it's an EXP-buff item; other
     --    "uses" lines (meds, salvos, etc.) never touch our state.
@@ -203,7 +246,8 @@ local function on_text_in(e)
 
     -- XP gain. Only accumulate while the Dedication buff is actually up
     --    (read from the buff array) and we know which item it came from.
-    if tracked_item ~= '' and player_has_dedication() then
+    --
+    if tracked_item ~= '' and dedication_up() then
         local xp = tonumber(text:match('^' .. escaped_name .. ' gains (%d+) experience points?%.'));
         if xp and xp > 0 then
             -- Total XP after buff = base + base * pct/100 = base * (100+pct)/100
@@ -213,10 +257,28 @@ local function on_text_in(e)
             if bonus < 0 then bonus = 0; end
             bonus_used = bonus_used + bonus;
             if bonus_used > tracked_cap then bonus_used = tracked_cap; end
+            save_state();
             return;
         end
     end
+end
 
+local function on_text_in(e)
+    local raw = e.message;
+    if type(raw) ~= 'string' or #raw == 0 then return; end
+
+    ensure_player_name_cached();
+    if escaped_name == '' then return; end
+
+    -- Strip auto-translate + color escape bytes, then split on FFXI's
+    -- in-message line separator (0x07) and real newlines. The game PACKS
+    -- multiple display lines into one message ("EXP chain #2!\x07Cowrevenge
+    -- gains 225 experience points.") -- anchored matches fail on the packed
+    -- form, which is why chain-kill XP wasn't tracked.
+    local cleaned = raw:gsub('\x1E.', ''):gsub('\x1F.', '');
+    for line in cleaned:gmatch('[^\x07\r\n]+') do
+        handle_line(line);
+    end
 end
 
 ---------------------------------------------------------------------
@@ -224,11 +286,11 @@ end
 ---------------------------------------------------------------------
 
 function M.Initialize(settings)
+    load_state();
     if not text_event_registered then
         ashita.events.register('text_in', 'bovinededication_text_in', on_text_in);
         text_event_registered = true;
     end
-    print('[dedication] initialized (registry) -- text handler registered.');
 end
 
 function M.UpdateVisuals(settings) end
@@ -237,6 +299,7 @@ function M.SetHidden(state) hidden = (state == true); end
 -- Config menu Reset button hook. Wipes both pending and tracked state.
 function M.Reset()
     clear_all();
+    save_state();
 end
 
 -- Config menu Force buttons: seed the tracker as if the player had used
@@ -266,6 +329,7 @@ function M.ForceItem(name)
     tracked_cap   = hit.data.cap_exp;
     bonus_used    = 0;
     effect_up     = true;
+    save_state();
     print('[dedication] Forced: ' .. hit.canonical .. ' (+' .. hit.data.bonus .. '%, cap ' .. hit.data.cap_exp .. ').');
 end
 
@@ -307,6 +371,7 @@ function M.GetBuffNames()
 end
 
 function M.Cleanup()
+    save_state();
     if text_event_registered then
         ashita.events.unregister('text_in', 'bovinededication_text_in');
         text_event_registered = false;
@@ -322,7 +387,8 @@ local last_draw_at = 0.0;   -- stamped every DrawWindow entry (Debug reports age
 function M.DrawWindow(settings)
     -- State maintenance runs BEFORE any visibility early-return so pending
     -- commits and expiry keep working while the window is hidden.
-    local has = player_has_dedication();
+    local has_raw = player_has_dedication();
+    local has = dedication_up();
     local tnow = now_sec();
     last_draw_at = tnow;
 
@@ -331,7 +397,7 @@ function M.DrawWindow(settings)
     -- it as the tracked buff with a fresh counter. This is the proof the
     -- item worked; no edge within the window = the item failed (already
     -- had the effect, etc.) and the pending use expires below.
-    if has and not had_dedication then
+    if has_raw and not had_dedication then
         if last_item ~= '' and (tnow - last_item_at) <= ITEM_ACTIVATE_WINDOW_SEC then
             tracked_item = last_item;
             tracked_pct  = last_item_pct;
@@ -339,9 +405,10 @@ function M.DrawWindow(settings)
             bonus_used   = 0;
             last_item    = '';
             last_item_at = 0.0;
+            save_state();
         end
     end
-    had_dedication = has;
+    had_dedication = has_raw;
 
     -- Pending expiry: no activation within the window -> item failed.
     if last_item ~= '' and (tnow - last_item_at) > ITEM_ACTIVATE_WINDOW_SEC then
