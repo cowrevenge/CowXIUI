@@ -250,10 +250,14 @@ local function handle_line(text)
     if tracked_item ~= '' and dedication_up() then
         local xp = tonumber(text:match('^' .. escaped_name .. ' gains (%d+) experience points?%.'));
         if xp and xp > 0 then
-            -- Total XP after buff = base + base * pct/100 = base * (100+pct)/100
-            -- Bonus portion of the reported XP = xp * pct / (100 + pct)
+            -- Total XP after buff = base + base * pct/100. Bonus portion of
+            -- the reported XP = xp * pct / (100 + pct). FLOOR, don't round:
+            -- the server floors its per-kill bonus, and rounding up drifted
+            -- the estimate high enough over a session to declare CAPPED one
+            -- mob before the buff actually wore. Floor keeps the tracker at
+            -- or slightly behind the server, never ahead.
             local pct = tracked_pct;
-            local bonus = math.floor(xp * pct / (100 + pct) + 0.5);
+            local bonus = math.floor(xp * pct / (100 + pct));
             if bonus < 0 then bonus = 0; end
             bonus_used = bonus_used + bonus;
             if bonus_used > tracked_cap then bonus_used = tracked_cap; end
