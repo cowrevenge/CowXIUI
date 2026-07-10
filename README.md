@@ -1,12 +1,12 @@
-![BovineXIUI Banner](assets/banner.png)
+![CowXIUI Banner](assets/banner.png)
 
-# BovineXIUI
+# CowXIUI
 
 A HorizonXI-tuned fork of [tirem/XIUI](https://github.com/tirem/XIUI) (the successor to HXUI). Era-accurate 75-cap focus, heavy BST / DRG / SMN quality-of-life, a modern visual refresh, and a deep set of UX improvements layered on the stock featureset.
 
 The structure of this README mirrors the config menu (`/xiui`). Each tab gets its own section below: what it controls, plus what's been added or changed vs stock XIUI.
 
-![BovineXIUI Overview](assets/overview.png)
+![CowXIUI Overview](assets/overview.png)
 
 ---
 
@@ -61,9 +61,9 @@ The biggest module by a wide margin. Member display, sub-target highlighting, cl
 - **Retail-style member dots.** Yellow Leader dot tucked left of the name, red Sync dot mirrored on the right side of the bar, sized to match retail. Alliance leader gets two yellow dots side by side.
 - **Gold Treasure / Cyan Trade dots** above Player 1 at the 25% / 75% marks.
 - **Click-to-target.** Click a member to target. Now also works during sub-target mode (see below).
-- **Click-to-debuff-cure.** Click a member's debuff icon and BovineXIUI fires the matching White Magic remover automatically. Self casts on `<me>`, party members cured by name. Knows Paralyna, Silena, Stona, Erase, Blindna, Cursna, Viruna, Poisona.
+- **Click-to-debuff-cure.** Click a member's debuff icon and CowXIUI fires the matching White Magic remover automatically. Self casts on `<me>`, party members cured by name. Knows Paralyna, Silena, Stona, Erase, Blindna, Cursna, Viruna, Poisona.
 - **Sub-target follow.** When you fire `/ma "Cure" <stpc>` or similar, the anchored Target Bar above the party list swaps to show whoever the sub-target cursor is on, instead of staying glued to the held mob. Arrow-key the cursor and the bar tracks it. Snaps back when sub-targeting ends.
-- **Click-to-sub-target.** Click a party member during sub-target mode and BovineXIUI walks the game's own cursor to that row by simulating arrow-key presses. Wrap-aware shortest path (6-party with cursor on row 4 and you click row 2 sends `up 2`, not `down 4`). You press Enter yourself to confirm. Implemented as keyboard input through Ashita's input manager so the game does all its own validation; no memory writes into the target manager.
+- **Click-to-sub-target.** Click a party member during sub-target mode and CowXIUI walks the game's own cursor to that row by simulating arrow-key presses. Wrap-aware shortest path (6-party with cursor on row 4 and you click row 2 sends `up 2`, not `down 4`). You press Enter yourself to confirm. Implemented as keyboard input through Ashita's input manager so the game does all its own validation; no memory writes into the target manager.
 - **Shift+drag.** Plain click targets the member under the cursor; window only moves when you hold Shift. Prevents accidental yank when click-targeting.
 - **Cure buttons** on party list rows (off by default).
 - **Anti-flicker on the Target Bar.** Previously the in-party-list Target Bar would briefly draw in the wrong place for one frame when you re-acquired a target. The anchor system now retains last-known dimensions across invalidations, so it lands correctly on the first frame.
@@ -132,13 +132,13 @@ A comprehensive floating HUD for **BST / DRG / SMN**.
 
 In-game notification system (gear, status, treasure pool sync).
 
-**Inherited from XIUI**, with the treasure pool integration tying into BovineLooty.
+**Inherited from XIUI**, with the treasure pool integration tying into CowLooty.
 
 ### Hideparty
 
 Hide FFXI's native UI elements. Built in so you don't need atom0s's standalone hideparty addon.
 
-**Different from the regular hideparty addon:** stock hideparty ships four signatures (party0, party1, party2, target cursor). BovineXIUI adds a fifth: the **spell / ability info window** (the "Blizzard III MP: 120 Recast: 27s" tooltip and its job-ability cousin). The slot for that primitive was discovered relative to the target cursor slot (target_slot − 4 bytes) using a primitive enumerator.
+**Different from the regular hideparty addon:** stock hideparty ships four signatures (party0, party1, party2, target cursor). CowXIUI adds a fifth: the **spell / ability info window** (the "Blizzard III MP: 120 Recast: 27s" tooltip and its job-ability cousin). The slot for that primitive was discovered relative to the target cursor slot (target_slot − 4 bytes) using a primitive enumerator.
 
 **The five toggles:**
 - Main party (members 1-6)
@@ -151,13 +151,13 @@ Defaults to hiding all five. Restores everything on unload, so toggling XIUI off
 
 ### Treasure Pool
 
-Custom treasure pool window with live item tracking, plus **BovineLooty** (the auto-pass / auto-lot system).
+Custom treasure pool window with live item tracking, plus **CowLooty** (the auto-pass / auto-lot system).
 
 **Original to this fork.**
 
 **Treasure Pool window:** live tracking of pool items as they drop, instead of relying on the native window.
 
-**BovineLooty:**
+**CowLooty:**
 - **Auto-Lot list.** Item IDs you want lotted automatically the moment they hit the pool.
 - **Auto-Pass list.** Item IDs you want passed automatically (the inverse, for stuff you don't want).
 - Configurable through the in-game window (`/xiui bvl` to open).
@@ -207,7 +207,7 @@ Clean dark-blue panel look. Switchable in **Global** → General. Affects party 
 
 ## Inherited Core Elements (from XIUI / HXUI)
 
-These are the base modules from upstream that BovineXIUI inherits and styles:
+These are the base modules from upstream that CowXIUI inherits and styles:
 
 - Player Bar
 - Target Bar (with TOT, buffs / debuffs)
@@ -253,7 +253,7 @@ These are the base modules from upstream that BovineXIUI inherits and styles:
 ## Credits and License
 
 - Upstream lineage: [tirem/XIUI](https://github.com/tirem/XIUI) and its predecessor [tirem/HXUI](https://github.com/tirem/HXUI). Massive thanks to the original authors.
-- HorizonXI-specific enhancements, Pet HUD, Modern theme, Cast Cost / Cast Box, BovineLooty (Auto Pass / Auto Lot), integrated Hideparty (including the spell / ability info window suppression), in-party Target Bar sub-target follow, click-to-sub-target, and the anchor anti-flicker work are original to this fork.
+- HorizonXI-specific enhancements, Pet HUD, Modern theme, Cast Cost / Cast Box, CowLooty (Auto Pass / Auto Lot), integrated Hideparty (including the spell / ability info window suppression), in-party Target Bar sub-target follow, click-to-sub-target, and the anchor anti-flicker work are original to this fork.
 - Jug pet data sourced from the [HorizonXI wiki](https://horizonffxi.wiki/Category:Familiars).
 - Licensed under **GPL-3.0**, matching upstream.
 
