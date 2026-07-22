@@ -69,6 +69,15 @@ local notifications = uiMods.notifications;
 local treasurePool = uiMods.treasurepool;
 local bovinelatent = uiMods.bovinelatent;
 local bovinededication = uiMods.bovinededication;
+local hotbar = uiMods.hotbar;
+-- Hotbar helper modules used directly from XIUI.lua (packet routing, palette
+-- persistence, skillchain WS highlighting, deferred slot tooltip flush).
+local macropalette = require('modules.hotbar.macropalette');
+local palette = require('modules.hotbar.palette');
+local skillchainModule = require('modules.hotbar.skillchain');
+local slotrenderer = require('modules.hotbar.slotrenderer');
+local imtext = require('libs.imtext');
+local components = require('config.components');
 local configMenu = require('config');
 local debuffHandler = require('handlers.debuffhandler');
 local petBuffHandler = require('handlers.petbuffhandler');
@@ -80,6 +89,10 @@ local TextureManager = require('libs.texturemanager');
 
 -- Global switch to hard-disable functionality that is limited on HX servers
 HzLimitedMode = true;
+
+-- Raw controller-input debug: when true, the xinput/dinput button handlers log
+-- every event before hotbar processing. Toggled via /xiui debug rawinput.
+DEBUG_RAW_INPUT = false;
 
 -- =================
 -- = XIUI DEV ONLY =
@@ -230,6 +243,13 @@ uiModules.Register('petBar', {
     settingsKey = 'petBarSettings',
     configKey = 'showPetBar',
     hideOnEventKey = 'petBarHideDuringEvents',
+    hasSetHidden = true,
+});
+uiModules.Register('hotbar', {
+    module = hotbar,
+    settingsKey = 'hotbarSettings',
+    configKey = 'showhotbar',
+    hideOnEventKey = 'hotbarHideDuringEvents',
     hasSetHidden = true,
 });
 uiModules.Register('notifications', {
@@ -442,6 +462,13 @@ end);
 ashita.events.register('d3d_present', 'present_cb', function ()
     if not bInitialized then return; end
 
+    -- Process deferred hotbar icon-cache clears scheduled by macro CRUD last
+    -- frame. Runs before any rendering this frame so stale caches don't produce
+    -- wrong icons. Guarded: only fires when the hotbar module is present.
+    if gConfig.hotbarEnabled and macropalette and macropalette.FlushPendingFrameWork then
+        pcall(macropalette.FlushPendingFrameWork);
+    end
+
     -- Process pending visual updates outside the render loop. Wrapped in pcall
     -- so a broken module's UpdateVisuals can't take down the present chain
     -- (which would also prevent the config menu from rendering and recovering).
@@ -512,6 +539,12 @@ ashita.events.register('d3d_present', 'present_cb', function ()
                 end
             end);
         end
+
+        -- Render deferred hotbar slot tooltip last so it draws on top of all
+        -- module windows (correct z-order). Guarded for hotbar presence.
+        if gConfig.hotbarEnabled and slotrenderer and slotrenderer.FlushTooltip then
+            pcall(slotrenderer.FlushTooltip);
+        end
     else
         pcall(uiModules.HideAll);
     end
@@ -531,6 +564,14 @@ end);
 
 ashita.events.register('load', 'load_cb', function ()
     UpdateUserSettings();
+
+    -- Populate the ImGui font atlas now, before the first d3d_present, so no
+    -- font selection in the hotbar/config has to mutate the atlas mid-frame
+    -- (which crashes on Ashita 4.16). See libs/imtext.lua PrewarmFonts notes.
+    if imtext and imtext.PrewarmFonts then
+        pcall(imtext.PrewarmFonts, components.available_fonts);
+    end
+
     uiModules.InitializeAll(gAdjustedSettings);
 
     -- Load mob data for current zone
@@ -549,6 +590,21 @@ ashita.events.register('unload', 'unload_cb', function ()
     ashita.events.unregister('d3d_present', 'present_cb');
     ashita.events.unregister('packet_in', 'packet_in_cb');
     ashita.events.unregister('command', 'command_cb');
+    ashita.events.unregister('key', 'key_cb');
+    ashita.events.unregister('xinput_state', 'xinput_state_cb');
+    ashita.events.unregister('xinput_button', 'xinput_button_cb');
+    ashita.events.unregister('dinput_button', 'dinput_button_cb');
+    ashita.events.unregister('dinput_state', 'dinput_state_cb');
+
+    -- Persist any pending hotbar/palette edits before teardown.
+    if macropalette and macropalette.IsHotbarDirty and macropalette.IsHotbarDirty() then
+        SaveSettingsToDisk();
+        macropalette.ClearHotbarDirty();
+    end
+    if palette and palette.IsPaletteStateDirty and palette.IsPaletteStateDirty() then
+        SaveSettingsToDisk();
+        palette.ClearPaletteStateDirty();
+    end
 
     statusHandler.clear_cache();
     progressbar.Cleanup();
@@ -708,6 +764,253 @@ ashita.events.register('command', 'command_cb', function (e)
         end
 
         -- ============================================
+        -- Hotbar Commands
+        -- ============================================
+
+        -- Toggle the native macro palette: /xiui macro
+        if (#command_args == 2 and command_args[2]:any('macro', 'macros')) then
+            macropalette.TogglePalette();
+            return;
+        end
+
+        -- Open the keybind editor: /xiui keybinds [bar]
+        if (#command_args >= 2 and command_args[2]:any('keybinds', 'keybind', 'binds', 'bind')) then
+            local hotbarConfig = require('config.hotbar');
+            local barIndex = tonumber(command_args[3]) or 1;
+            hotbarConfig.OpenKeybindEditor(barIndex);
+            return;
+        end
+
+        -- Execute a hotbar slot (invoked by the Ashita /bind system):
+        --   /xiui hotbar <bar> <slot>
+        if (command_args[2] == 'hotbar' and #command_args >= 4) then
+            local barIndex = tonumber(command_args[3]);
+            local slotIndex = tonumber(command_args[4]);
+            if barIndex and slotIndex then
+                local hotbarActions = require('modules.hotbar.actions');
+                hotbarActions.HandleKeybind(barIndex, slotIndex);
+            end
+            return;
+        end
+
+        -- Palette commands: /xiui palette <name|next|prev|list|first> [bar|all|crossbar]
+        -- Hotbar palettes (bars 1-6) and the crossbar have separate palette pools;
+        -- "all" spans both, "crossbar"/"cb"/"xb" targets the crossbar only, a bar
+        -- number targets one hotbar.
+        if (command_args[2] == 'palette' or command_args[2] == 'pal') then
+            local paletteModule = require('modules.hotbar.palette');
+            local hotbarData = require('modules.hotbar.data');
+            local jobId = hotbarData.jobId or 1;
+            local subjobId = hotbarData.subjobId or 0;
+
+            -- Bare "/xiui palette" opens the palette manager.
+            if #command_args < 3 then
+                require('config.palettemanager').Open();
+                return;
+            end
+
+            if command_args[3] == 'help' then
+                print('[XIUI] Palette commands:');
+                print('  /xiui palette                            - Open the palette manager');
+                print('  /xiui palette help                       - Show this help');
+                print('  /xiui palette <name> [bar|all|crossbar] - Switch to a named palette');
+                print('  /xiui palette next [crossbar]            - Cycle to next palette');
+                print('  /xiui palette prev [crossbar]            - Cycle to previous palette');
+                print('  /xiui palette list [crossbar]            - List available palettes');
+                print('  /xiui palette first [crossbar]           - Switch to first palette');
+                print('');
+                print('Target: omit for hotbars + crossbar, "crossbar"/"cb"/"xb" for crossbar only,');
+                print('or a bar number 1-6 to target a single hotbar.');
+                print('Keybinds: Ctrl+Up/Down (configure in Hotbar > Palette Cycling)');
+                print('Controller: RB + Dpad Up/Down cycles palettes');
+                return;
+            end
+
+            local action = command_args[3];
+            local barArg = command_args[4];
+
+            local function isCrossbarTarget(arg)
+                if not arg then return false; end
+                local lower = arg:lower();
+                return lower == 'crossbar' or lower == 'cb' or lower == 'xb';
+            end
+
+            local affectAll = (barArg == 'all');
+            local affectCrossbar = isCrossbarTarget(barArg);
+            local barIndex = (affectAll or affectCrossbar) and 1 or (tonumber(barArg) or 1);
+
+            if action == 'next' or action == 'prev' or action == 'previous' then
+                local direction = (action == 'next') and 1 or -1;
+                local results = {};
+
+                if not affectCrossbar then
+                    local hotbarResult = paletteModule.CyclePalette(1, direction, jobId, subjobId);
+                    if hotbarResult then
+                        table.insert(results, 'Hotbar: ' .. hotbarResult);
+                    end
+                end
+
+                local crossbarResult = paletteModule.CyclePaletteForCombo(nil, direction, jobId, subjobId);
+                if crossbarResult then
+                    table.insert(results, 'Crossbar: ' .. crossbarResult);
+                end
+
+                if #results > 0 then
+                    print('[XIUI] Palette -> ' .. table.concat(results, ', '));
+                else
+                    print('[XIUI] No palettes to cycle');
+                end
+            elseif action == 'list' then
+                if not affectCrossbar then
+                    local palettes = paletteModule.GetAvailablePalettes(barIndex, jobId, subjobId);
+                    local currentPalette = paletteModule.GetActivePaletteDisplayName(barIndex);
+                    print('[XIUI] Bar ' .. barIndex .. ' palettes:');
+                    for _, name in ipairs(palettes) do
+                        local marker = (name == currentPalette) and ' *' or '';
+                        print('  - ' .. name .. marker);
+                    end
+                end
+
+                if affectCrossbar or not tonumber(barArg) then
+                    local crossbarPalettes = paletteModule.GetCrossbarAvailablePalettes(jobId, subjobId);
+                    local activeCrossbar = paletteModule.GetActivePaletteDisplayNameForCombo();
+                    print('[XIUI] Crossbar palettes:');
+                    if #crossbarPalettes == 0 then
+                        print('  (none defined)');
+                    else
+                        for _, name in ipairs(crossbarPalettes) do
+                            local marker = (name == activeCrossbar) and ' *' or '';
+                            print('  - ' .. name .. marker);
+                        end
+                    end
+                end
+            elseif action == 'base' or action == 'reset' or action == 'first' then
+                local firstNames = {};
+
+                if not affectCrossbar then
+                    local palettes = paletteModule.GetAvailablePalettes(1, jobId, subjobId);
+                    if #palettes > 0 then
+                        for i = 1, 6 do
+                            paletteModule.SetActivePalette(i, palettes[1]);
+                        end
+                        table.insert(firstNames, 'Hotbar: ' .. palettes[1]);
+                    end
+                end
+
+                local crossbarPalettes = paletteModule.GetCrossbarAvailablePalettes(jobId, subjobId);
+                if #crossbarPalettes > 0 then
+                    paletteModule.SetActivePaletteForCombo(nil, crossbarPalettes[1]);
+                    table.insert(firstNames, 'Crossbar: ' .. crossbarPalettes[1]);
+                end
+
+                if #firstNames > 0 then
+                    print('[XIUI] Palette -> ' .. table.concat(firstNames, ', '));
+                else
+                    print('[XIUI] No palettes available');
+                end
+            else
+                -- Switch to a named palette. Use the ORIGINAL-case args so palette
+                -- names with capitals/spaces resolve (command_args is lowercased).
+                local originalArgs = e.command:args();
+                local paletteName = originalArgs[3];
+                local targetIsAll = false;
+                local targetIsCrossbar = false;
+
+                if #originalArgs >= 4 then
+                    local lastArg = originalArgs[#originalArgs];
+                    local lastLower = lastArg:lower();
+                    local isAllSuffix = (lastLower == 'all');
+                    local isCrossbarSuffix = isCrossbarTarget(lastArg);
+                    local isBarSuffix = tonumber(lastArg) ~= nil;
+
+                    if isAllSuffix then
+                        targetIsAll = true;
+                    elseif isCrossbarSuffix then
+                        targetIsCrossbar = true;
+                    elseif isBarSuffix then
+                        barIndex = tonumber(lastArg);
+                    end
+
+                    if isAllSuffix or isCrossbarSuffix or isBarSuffix then
+                        if #originalArgs > 4 then
+                            local nameParts = {};
+                            for i = 3, #originalArgs - 1 do
+                                table.insert(nameParts, originalArgs[i]);
+                            end
+                            paletteName = table.concat(nameParts, ' ');
+                        end
+                    else
+                        local nameParts = {};
+                        for i = 3, #originalArgs do
+                            table.insert(nameParts, originalArgs[i]);
+                        end
+                        paletteName = table.concat(nameParts, ' ');
+                    end
+                end
+
+                if targetIsCrossbar then
+                    if paletteModule.CrossbarPaletteExists(paletteName, jobId, subjobId) then
+                        paletteModule.SetActivePaletteForCombo(nil, paletteName);
+                        print('[XIUI] Crossbar palette: ' .. paletteName);
+                    else
+                        print('[XIUI] Crossbar palette "' .. paletteName .. '" not found');
+                    end
+                elseif targetIsAll then
+                    local anyFound = false;
+                    for i = 1, 6 do
+                        if paletteModule.PaletteExists(i, paletteName, jobId, subjobId) then
+                            paletteModule.SetActivePalette(i, paletteName);
+                            anyFound = true;
+                        end
+                    end
+                    if paletteModule.CrossbarPaletteExists(paletteName, jobId, subjobId) then
+                        paletteModule.SetActivePaletteForCombo(nil, paletteName);
+                        anyFound = true;
+                    end
+                    if anyFound then
+                        print('[XIUI] All bars palette: ' .. paletteName);
+                    else
+                        print('[XIUI] Palette "' .. paletteName .. '" not found');
+                    end
+                else
+                    if paletteModule.PaletteExists(barIndex, paletteName, jobId, subjobId) then
+                        paletteModule.SetActivePalette(barIndex, paletteName);
+                        print('[XIUI] Bar ' .. barIndex .. ' palette: ' .. paletteName);
+                    else
+                        print('[XIUI] Palette "' .. paletteName .. '" not found for bar ' .. barIndex);
+                    end
+                end
+            end
+            return;
+        end
+
+        -- Hotbar debug toggles: /xiui debug <hotbar|subtarget|macroblock|rawinput|palette>
+        if (command_args[2] == 'debug') then
+            local moduleName = command_args[3];
+            if moduleName == 'hotbar' then
+                hotbar.SetDebugEnabled(not hotbar.IsDebugEnabled());
+            elseif moduleName == 'subtarget' then
+                hotbar.SetSubtargetDebugEnabled(not hotbar.IsSubtargetDebugEnabled());
+            elseif moduleName == 'macroblock' then
+                local macrosLib = require('libs.ffxi.macros');
+                local controller = require('modules.hotbar.controller');
+                local newState = not macrosLib.is_debug_enabled();
+                macrosLib.set_debug_enabled(newState);
+                controller.SetMacroBlockDebugEnabled(newState);
+            elseif moduleName == 'rawinput' then
+                DEBUG_RAW_INPUT = not DEBUG_RAW_INPUT;
+                print('[XIUI] Raw input debug: ' .. (DEBUG_RAW_INPUT and 'ON' or 'OFF'));
+                print('[XIUI] Logs ALL xinput/dinput events before hotbar processing.');
+            elseif moduleName == 'palette' then
+                hotbar.SetPaletteDebugEnabled(not hotbar.IsPaletteDebugEnabled());
+            else
+                print('[XIUI] Debug modules: hotbar, subtarget, macroblock, rawinput, palette');
+                print('[XIUI] Usage: /xiui debug <module>');
+            end
+            return;
+        end
+
+        -- ============================================
         -- Cache Debug Commands
         -- ============================================
 
@@ -788,6 +1091,11 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         petBar.HandlePacket(e);
     end
 
+    -- Hotbar pet palette sync (0x0068 Pet Sync) - rebinds pet-aware bars/combos.
+    if e.id == 0x0068 and gConfig.hotbarEnabled then
+        hotbar.HandlePetSyncPacket();
+    end
+
     if (e.id == 0x0028) then
         local actionPacket = ParseActionPacket(e);
         if actionPacket then
@@ -801,6 +1109,10 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
             if gConfig.showPetBar then petBuffHandler.HandleActionPacket(actionPacket); end
             actionTracker.HandleActionPacket(actionPacket);
             if gConfig.showNotifications then notifications.HandleActionPacket(actionPacket); end
+            -- Skillchain tracking for hotbar/crossbar WS slot highlighting.
+            if gConfig.hotbarEnabled then
+                skillchainModule.HandleActionPacket(actionPacket);
+            end
         end
     elseif (e.id == 0x00E) then
         local mobUpdatePacket = ParseMobUpdatePacket(e);
@@ -821,6 +1133,11 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         MarkPartyCacheDirty();
         ClearEntityCache();
         bLoggedIn = true;
+        -- Initialize hotbar for the current job on zone-in (covers initial login
+        -- and job changes that happened during the zone transition).
+        if gConfig.hotbarEnabled then
+            hotbar.HandleJobChangePacket(e);
+        end
     elseif (e.id == 0x0029) then
         local messagePacket = ParseMessagePacket(e.data);
         if messagePacket then
@@ -849,11 +1166,33 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
             end
         end
     elseif (e.id == 0x00B) then
+        -- Persist pending hotbar/palette edits before the loading screen masks
+        -- the disk write.
+        if gConfig.hotbarEnabled then
+            if macropalette.IsHotbarDirty and macropalette.IsHotbarDirty() then
+                SaveSettingsToDisk();
+                macropalette.ClearHotbarDirty();
+            end
+            if palette.IsPaletteStateDirty and palette.IsPaletteStateDirty() then
+                SaveSettingsToDisk();
+                palette.ClearPaletteStateDirty();
+            end
+        end
         notifications.HandleZonePacket();
         treasurePool.HandleZonePacket();
         gilTracker.HandleZoneOutPacket();  -- Track zone-out time for login detection (issue #111)
         TextureManager.clearOnZone();
         bLoggedIn = false;
+        -- Notify hotbar of zone (clears transient state) and reset skillchains.
+        if gConfig.hotbarEnabled then
+            hotbar.HandleZonePacket();
+            skillchainModule.ClearState();
+        end
+    elseif (e.id == 0x001B) then
+        -- Job change packet - rebind hotbar to the new job's actions/palettes.
+        if gConfig.hotbarEnabled then
+            hotbar.HandleJobChangePacket(e);
+        end
     elseif (e.id == 0x076) then
         statusHandler.ReadPartyBuffsFromPacket(e);
     elseif (e.id == 0x0DD) then
@@ -931,4 +1270,49 @@ ashita.events.register('packet_out', 'packet_out_cb', function (e)
             notifications.HandlePartyInviteResponse(e);
         end
     end
+end);
+
+-- ============================================
+-- Keyboard Input Handler (hotbar keybinds)
+-- ============================================
+-- Fires for WNDPROC keyboard input. hotbar.HandleKey gates itself on
+-- gConfig.hotbarEnabled internally, so no outer guard is needed.
+ashita.events.register('key', 'key_cb', function (event)
+    hotbar.HandleKey(event);
+end);
+
+-- ============================================
+-- Controller Input Handlers (crossbar mode)
+-- ============================================
+
+-- XInput controller state (analog triggers). Fires every frame; not logged.
+ashita.events.register('xinput_state', 'xinput_state_cb', function (e)
+    hotbar.HandleXInputState(e);
+end);
+
+-- XInput button (blocks native game macros while the crossbar owns the combo).
+ashita.events.register('xinput_button', 'xinput_button_cb', function (e)
+    if DEBUG_RAW_INPUT then
+        print(string.format('[XIUI RawInput] xinput_button: button=%d state=%d', e.button or -1, e.state or -1));
+    end
+    local shouldBlock = hotbar.HandleXInputButton(e);
+    if shouldBlock then
+        e.blocked = true;
+    end
+end);
+
+-- DirectInput button (DualSense / Switch Pro / Stadia controllers).
+ashita.events.register('dinput_button', 'dinput_button_cb', function (e)
+    if DEBUG_RAW_INPUT then
+        print(string.format('[XIUI RawInput] dinput_button: button=%d state=%d', e.button or -1, e.state or -1));
+    end
+    local shouldBlock = hotbar.HandleDInputButton(e);
+    if shouldBlock then
+        e.blocked = true;
+    end
+end);
+
+-- DirectInput state (D-pad POV on DirectInput controllers). Fires every frame.
+ashita.events.register('dinput_state', 'dinput_state_cb', function (e)
+    hotbar.HandleDInputState(e);
 end);

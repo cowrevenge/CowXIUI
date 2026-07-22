@@ -682,6 +682,91 @@ function M.createModuleDefaults()
             },
         },
 
+        -- settings for hotbar
+        hotbarSettings = T{
+            font_settings = T{
+                font_alignment = gdi.Alignment.Left,
+                font_family = 'Consolas',
+                font_height = 10,
+                font_color = 0xFFFFFFFF,
+                font_flags = gdi.FontFlags.None,
+                outline_color = 0xFF000000,
+                outline_width = 2,
+            },
+            keybind_font_settings = T{
+                font_alignment = gdi.Alignment.Left,
+                font_family = 'Consolas',
+                font_height = 8,
+                font_color = 0xCCCCCCCC,
+                font_flags = gdi.FontFlags.None,
+                outline_color = 0xFF000000,
+                outline_width = 1,
+            },
+            label_font_settings = T{
+                font_alignment = gdi.Alignment.Left,
+                font_family = 'Consolas',
+                font_height = 10,
+                font_color = 0xFFFFFFFF,
+                font_flags = gdi.FontFlags.None,
+                outline_color = 0xFF000000,
+                outline_width = 2,
+            },
+            scaleX = 1.0,
+            scaleY = 1.0,
+            bgScale = 1.0,
+            borderScale = 1.0,
+            background_opacity = 0.87,
+            border_opacity = 1.0,
+        },
+
+        -- settings for crossbar (controller-based hotbar)
+        crossbarSettings = T{
+            keybind_font_settings = T{
+                font_alignment = gdi.Alignment.Left,
+                font_family = 'Consolas',
+                font_height = 8,
+                font_color = 0xFFFFFFFF,
+                font_flags = gdi.FontFlags.None,
+                outline_color = 0xFF000000,
+                outline_width = 1,
+            },
+            label_font_settings = T{
+                font_alignment = gdi.Alignment.Center,
+                font_family = 'Consolas',
+                font_height = 10,
+                font_color = 0xFFFFFFFF,
+                font_flags = gdi.FontFlags.None,
+                outline_color = 0xFF000000,
+                outline_width = 2,
+            },
+            trigger_font_settings = T{
+                font_alignment = gdi.Alignment.Center,
+                font_family = 'Consolas',
+                font_height = 14,
+                font_color = 0xFFFFCC00,
+                font_flags = gdi.FontFlags.Bold,
+                outline_color = 0xFF000000,
+                outline_width = 2,
+            },
+            recast_font_settings = T{
+                font_alignment = gdi.Alignment.Center,
+                font_family = 'Consolas',
+                font_height = 12,
+                font_color = 0xFFFFFFFF,
+                font_flags = gdi.FontFlags.Bold,
+                outline_color = 0xFF000000,
+                outline_width = 2,
+            },
+            prim_data = T{
+                visible = false,
+                can_focus = false,
+                locked = true,
+                width = 48,
+                height = 48,
+                color = 0x55000000,
+            },
+        },
+
         -- settings for the latent trial tracker (bovinelatent). Empty for now;
         -- the module keeps its own JSON state. Present so the registry has
         -- something to pass as gAdjustedSettings[settingsKey] to Initialize.

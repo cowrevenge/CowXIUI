@@ -28,6 +28,7 @@ function M.createUserSettingsDefaults()
         showPetBar = true,
         showCastCost = true,
         showNotifications = true,
+        showhotbar = true,
         showBovinelatent = true,
         bovinelatentHidden = false,
         bovinelatentRainbowOnFinish = true,
@@ -50,6 +51,40 @@ function M.createUserSettingsDefaults()
         treasurePoolBackgroundTheme = 'Plain', -- Background theme
         treasurePoolPreview = false,          -- Show preview with test data
         treasurePoolExpanded = false,         -- Expanded view (false = collapsed)
+
+        -- Hotbar settings (global)
+        hotbarEnabled = true,                 -- Show hotbar module (in-panel Enabled toggle)
+        -- Lock movement: when true, disables drag/drop and slot swapping for hotbar bars
+        hotbarLockMovement = false,
+        hotbarPreview = false,                -- Show preview with test data
+        hotbarHideDuringEvents = true,        -- Hide hotbar during cutscenes/events
+        hotbarHideOnMenuFocus = false,        -- Hide when a game menu is open
+        hotbarHideMacroPalette = false,       -- Keep visible while native macro palette open
+
+        -- Global hotbar visual settings (used when a bar's useGlobalSettings = true)
+        hotbarGlobal = factories.createHotbarGlobalDefaults(),
+
+        -- Per-bar hotbar settings (Bar 1-6 each independently configured).
+        -- Bars 1-3 enabled by default, bars 4-6 disabled.
+        -- Default keybindings (bottom to top): Bar1=Alt+1-0, Bar2=Ctrl+1-0, Bar3=1-0
+        hotbarBar1 = factories.createHotbarBarDefaults({
+            rows = 1, columns = 12,
+            keyBindings = factories.createNumberRowKeybindings(false, true, false),  -- Alt (bottom row)
+        }),
+        hotbarBar2 = factories.createHotbarBarDefaults({
+            rows = 1, columns = 12,
+            keyBindings = factories.createNumberRowKeybindings(true, false, false),  -- Ctrl (middle row)
+        }),
+        hotbarBar3 = factories.createHotbarBarDefaults({
+            rows = 1, columns = 12,
+            keyBindings = factories.createNumberRowKeybindings(false, false, false), -- No modifier (top row)
+        }),
+        hotbarBar4 = factories.createHotbarBarDefaults({ rows = 1, columns = 12, enabled = false }),
+        hotbarBar5 = factories.createHotbarBarDefaults({ rows = 1, columns = 12, enabled = false }),
+        hotbarBar6 = factories.createHotbarBarDefaults({ rows = 1, columns = 12, enabled = false }),
+
+        -- Crossbar settings (controller-based hotbar mode)
+        hotbarCrossbar = factories.createCrossbarDefaults(),
 
         -- Notifications settings
         notificationsShowPartyInvite = true,

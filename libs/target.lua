@@ -62,6 +62,38 @@ function M.GetSubTargetActive()
 end
 
 -- ========================================
+-- Subtarget helpers (required by modules/hotbar/actions.lua)
+-- ========================================
+
+--- Returns the main-target and sub-target slot indices (0 when none).
+function M.GetTargetSlotIndices()
+    local playerTarget = AshitaCore:GetMemoryManager():GetTarget();
+    if playerTarget == nil then
+        return 0, 0;
+    end
+    return playerTarget:GetTargetIndex(0) or 0, playerTarget:GetTargetIndex(1) or 0;
+end
+
+--- True when the player has a main target selected (slot 0).
+function M.HasMainTarget()
+    local main, _ = M.GetTargetSlotIndices();
+    return main ~= 0;
+end
+
+--- True when the game reports target/subtarget selection was dismissed
+--- without a confirm (used by the hotbar to cancel a pending subtarget macro).
+function M.GetTargetDeactivate()
+    local playerTarget = AshitaCore:GetMemoryManager():GetTarget();
+    if playerTarget == nil then
+        return false;
+    end
+    if playerTarget.GetTargetDeactivate ~= nil then
+        return playerTarget:GetTargetDeactivate() == 1;
+    end
+    return false;
+end
+
+-- ========================================
 -- Target Retrieval
 -- ========================================
 

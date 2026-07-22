@@ -397,6 +397,43 @@ function M.getFileTexture(path)
     end, 'assets');
 end
 
+-- ============================================================================
+-- Custom hotbar icons (ported from upstream XIUI, tirem/XIUI)
+-- Required by the hotbar slot renderer for user-supplied / xiui-icons artwork.
+-- Uses this fork's existing getOrCreate + loadTextureFromFile internals. The
+-- 'custom_icons' category has no CATEGORY_CONFIG entry, so getOrCreate simply
+-- skips eviction tracking for these (fine: custom icons are few and long-lived).
+-- ============================================================================
+local CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS = 'submodules\\xiui-icons\\';
+local CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS_LEN = #CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS;
+
+-- Resolve a custom-icon relative path to a full disk path.
+function M.ResolveCustomIconPath(relativePath)
+    if relativePath == nil or relativePath == '' then
+        return nil;
+    end
+    local installPath = AshitaCore:GetInstallPath();
+    if relativePath:sub(1, CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS_LEN) == CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS then
+        local rest = relativePath:sub(CUSTOM_ICON_ROOT_PREFIX_XIUI_ICONS_LEN + 1);
+        return string.format('%saddons\\XIUI\\submodules\\xiui-icons\\XIUI\\assets\\hotbar\\%s', installPath, rest);
+    end
+    return string.format('%saddons\\XIUI\\assets\\hotbar\\custom\\%s', installPath, relativePath);
+end
+
+-- Load (and cache) a custom hotbar icon by relative path.
+function M.getCustomIcon(relativePath)
+    if relativePath == nil or relativePath == '' then
+        return nil;
+    end
+
+    local key = 'custom_' .. relativePath;
+    return getOrCreate(key, function()
+        local fullPath = M.ResolveCustomIconPath(relativePath);
+        if not fullPath then return nil; end
+        return loadTextureFromFile(fullPath);
+    end, 'custom_icons');
+end
+
 -- Generic get function with custom loader
 -- @param key string - Unique cache key
 -- @param loader function - Function that returns texture table

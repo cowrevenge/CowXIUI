@@ -26,6 +26,7 @@ local treasurepoolModule = require('config.treasurepool');
 local bovinelatentModule = require('config.bovinelatent');
 local bovinededicationModule = require('config.bovinededication');
 local hidepartyModule = require('config.hideparty');
+local hotbarModule = require('config.hotbar');
 
 local treasurePool = require('modules.treasurepool.init');
 
@@ -108,6 +109,12 @@ local selectedPetBarTab = 1;  -- 1 = Pet Bar, 2 = Pet Target
 local selectedPetTypeTab = 1;  -- 1 = Avatar, 2 = Charm, 3 = Jug, 4 = Automaton, 5 = Wyvern
 local selectedPetTypeColorTab = 1;  -- Pet type color sub-tab
 local selectedPetBarColorTab = 1;  -- 1 = Pet Bar, 2 = Pet Target (for color settings)
+local selectedHotbarTab = 1;       -- 1 = Global, 2-7 = Bar 1-6
+local selectedHotbarModeTab = 'hotbar';  -- 'hotbar' or 'crossbar' when mode is 'both'
+local selectedHotbarCrossbarTab = 1;     -- 1=L2, 2=R2, 3=L2R2, etc.
+local selectedHotbarColorTab = 1;
+local selectedHotbarColorModeTab = 'hotbar';
+local selectedHotbarColorCrossbarTab = 1;
 
 -- Category definitions
 local categories = {
@@ -122,6 +129,7 @@ local categories = {
     { name = 'castBar', label = 'Cast Bar' },
     { name = 'castCost', label = 'Cast Cost' },
     { name = 'petBar', label = 'Pet Bar' },
+    { name = 'hotbar', label = 'Hotbar' },
     { name = 'notifications', label = 'Notifications' },
     { name = 'hideparty', label = 'Hideparty' },
     { name = 'treasurePool', label = 'Treasure Pool' },
@@ -142,6 +150,23 @@ local function buildState()
         selectedPetBarColorTab = selectedPetBarColorTab,
         selectedPetTypeTab = selectedPetTypeTab,
         selectedPetTypeColorTab = selectedPetTypeColorTab,
+        selectedHotbarTab = selectedHotbarTab,
+        selectedModeTab = selectedHotbarModeTab,
+        selectedCrossbarTab = selectedHotbarCrossbarTab,
+        githubTexture = githubTexture,
+    };
+end
+
+-- Build state object specifically for hotbar COLOR settings. The hotbar
+-- config module reuses the same state keys (selectedHotbarTab/selectedModeTab/
+-- selectedCrossbarTab) for both its settings and color panels, so we feed it
+-- the color-specific locals here to keep the two panels' tab selections
+-- independent.
+local function buildHotbarColorState()
+    return {
+        selectedHotbarTab = selectedHotbarColorTab,
+        selectedModeTab = selectedHotbarColorModeTab,
+        selectedCrossbarTab = selectedHotbarColorCrossbarTab,
         githubTexture = githubTexture,
     };
 end
@@ -154,6 +179,9 @@ local function applySettingsState(newState)
         if newState.selectedTargetBarTab then selectedTargetBarTab = newState.selectedTargetBarTab; end
         if newState.selectedPetBarTab then selectedPetBarTab = newState.selectedPetBarTab; end
         if newState.selectedPetTypeTab then selectedPetTypeTab = newState.selectedPetTypeTab; end
+        if newState.selectedHotbarTab then selectedHotbarTab = newState.selectedHotbarTab; end
+        if newState.selectedModeTab then selectedHotbarModeTab = newState.selectedModeTab; end
+        if newState.selectedCrossbarTab then selectedHotbarCrossbarTab = newState.selectedCrossbarTab; end
     end
 end
 
@@ -164,6 +192,16 @@ local function applyColorState(newState)
         if newState.selectedTargetBarColorTab then selectedTargetBarColorTab = newState.selectedTargetBarColorTab; end
         if newState.selectedPetBarColorTab then selectedPetBarColorTab = newState.selectedPetBarColorTab; end
         if newState.selectedPetTypeColorTab then selectedPetTypeColorTab = newState.selectedPetTypeColorTab; end
+    end
+end
+
+-- Hotbar color panel returns the same state keys as its settings panel, so it
+-- gets its own applier writing to the color-specific locals.
+local function applyHotbarColorState(newState)
+    if newState then
+        if newState.selectedHotbarTab then selectedHotbarColorTab = newState.selectedHotbarTab; end
+        if newState.selectedModeTab then selectedHotbarColorModeTab = newState.selectedModeTab; end
+        if newState.selectedCrossbarTab then selectedHotbarColorCrossbarTab = newState.selectedCrossbarTab; end
     end
 end
 
@@ -213,6 +251,11 @@ end
 
 local function DrawPetBarSettings()
     local newState = petbarModule.DrawSettings(buildState());
+    applySettingsState(newState);
+end
+
+local function DrawHotbarSettings()
+    local newState = hotbarModule.DrawSettings(buildState());
     applySettingsState(newState);
 end
 
@@ -285,6 +328,11 @@ local function DrawPetBarColorSettings()
     applyColorState(newState);
 end
 
+local function DrawHotbarColorSettings()
+    local newState = hotbarModule.DrawColorSettings(buildHotbarColorState());
+    applyHotbarColorState(newState);
+end
+
 local function DrawNotificationsColorSettings()
     notificationsModule.DrawColorSettings();
 end
@@ -318,6 +366,7 @@ local settingsDrawFunctions = {
     DrawCastBarSettings,
     DrawCastCostSettings,
     DrawPetBarSettings,
+    DrawHotbarSettings,
     DrawNotificationsSettings,
     DrawHidepartySettings,
     DrawTreasurePoolSettings,
@@ -337,6 +386,7 @@ local colorSettingsDrawFunctions = {
     DrawCastBarColorSettings,
     DrawCastCostColorSettings,
     DrawPetBarColorSettings,
+    DrawHotbarColorSettings,
     DrawNotificationsColorSettings,
     DrawHidepartyColorSettings,
     DrawTreasurePoolColorSettings,

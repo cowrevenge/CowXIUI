@@ -298,4 +298,383 @@ function M.createNotificationGroupDefaults(overrides)
     return defaults;
 end
 
+
+-- ============================================================================
+-- Hotbar factory functions (ported from upstream XIUI, tirem/XIUI)
+-- ============================================================================
+
+-- Virtual key codes for number row keys
+-- https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+local VK_KEYS = {
+    ['1'] = 0x31,  -- 49
+    ['2'] = 0x32,  -- 50
+    ['3'] = 0x33,  -- 51
+    ['4'] = 0x34,  -- 52
+    ['5'] = 0x35,  -- 53
+    ['6'] = 0x36,  -- 54
+    ['7'] = 0x37,  -- 55
+    ['8'] = 0x38,  -- 56
+    ['9'] = 0x39,  -- 57
+    ['0'] = 0x30,  -- 48
+    ['-'] = 0xBD,  -- 189 (OEM_MINUS)
+    ['='] = 0xBB,  -- 187 (OEM_PLUS)
+};
+
+-- Helper to create default number row keybindings (1-9, 0) with optional modifiers
+-- @param ctrl boolean - require Ctrl modifier
+-- @param alt boolean - require Alt modifier
+-- @param shift boolean - require Shift modifier
+-- @param keyCount number - number of keys to bind (default 10: keys 1-9, 0)
+-- @return table - keyBindings table for up to 12 slots
+function M.createNumberRowKeybindings(ctrl, alt, shift, keyCount)
+    local allKeys = {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='};
+    keyCount = keyCount or 10;  -- Default to 10 keys (1-9, 0), no - or =
+    local bindings = {};
+    for i = 1, math.min(keyCount, #allKeys) do
+        local keyName = allKeys[i];
+        bindings[i] = {
+            key = VK_KEYS[keyName],
+            ctrl = ctrl or false,
+            alt = alt or false,
+            shift = shift or false,
+        };
+    end
+    return bindings;
+end
+
+
+-- Factory function to create global hotbar settings (shared across all bars when useGlobalSettings is true)
+function M.createHotbarGlobalDefaults()
+    return T{
+        -- Game UI patches
+        disableMacroBars = false,  -- Disable native XI macros (macro bar display + controller macro blocking)
+        controllerHoldToShow = true,  -- Controller triggers use hold-to-show (like macrofix addon) instead of tap-to-toggle
+
+        -- Blocked game keys - array of key definitions that should be blocked from reaching the game
+        -- Each entry: { key = virtualKeyCode, ctrl = bool, alt = bool, shift = bool }
+        -- Example: { key = 189, ctrl = false, alt = false, shift = false } blocks '-' key
+        blockedGameKeys = {},
+
+        -- Palette cycling keybinds (keyboard)
+        -- Set key to 0 to disable
+        paletteCycleEnabled = true,       -- Enable keyboard palette cycling
+        paletteCyclePrevKey = 38,         -- VK_UP (Up Arrow)
+        paletteCycleNextKey = 40,         -- VK_DOWN (Down Arrow)
+        paletteCycleModifier = 'ctrl',    -- 'ctrl', 'alt', 'shift', or 'none'
+
+        -- Palette cycling controller (RB + Dpad)
+        paletteCycleControllerEnabled = true,  -- Enable controller palette cycling
+        hotbarPaletteCycleButton = 'R1',       -- 'R1' or 'L1' for hotbar cycling
+
+        -- Visual settings
+        slotSize = 48,          -- Slot size in pixels
+        bgScale = 1.0,
+        borderScale = 1.0,
+        backgroundOpacity = 0.87,
+        borderOpacity = 1.0,
+        backgroundTheme = '-None-',
+        showHotbarNumber = true,
+        showSlotFrame = false,
+        customFramePath = '',   -- Custom frame image path (empty = use default)
+        showActionLabels = false,
+        actionLabelOffsetX = 0,
+        actionLabelOffsetY = 0,
+        hideEmptySlots = false, -- Hide slots with no action assigned
+
+        -- Slot padding (gap between slots)
+        slotXPadding = 8,
+        slotYPadding = 6,
+
+        -- Bar positioning (hotbar only; crossbar unchanged)
+        positionMode = 'absolute',  -- 'absolute' or 'anchored'
+        hotbarSpacing = 0,        -- Vertical gap between anchored hotbars
+
+        -- Gap between window background edge and slot grid
+        backgroundPaddingX = 0,
+        backgroundPaddingY = 0,
+
+        -- Slot appearance
+        slotBackgroundColor = 0x55000000,
+
+        -- Window colors
+        bgColor = 0xFFFFFFFF,
+        borderColor = 0xFFFFFFFF,
+
+        -- Font settings
+        keybindFontSize = 8,
+        keybindFontColor = 0xFFFFFFFF,
+        labelFontSize = 10,
+        labelFontColor = 0xFFFFFFFF,
+        labelCooldownColor = 0xFF888888,
+        labelNoMpColor = 0xFFFF4444,
+        
+        -- Text position settings
+        showKeybinds = true,
+        keybindAnchor = 'topLeft',      -- topLeft, topRight, bottomLeft, bottomRight
+        keybindOffsetX = 0,
+        keybindOffsetY = 0,
+        showMpCost = true,
+        mpCostAnchor = 'topRight',
+        mpCostOffsetX = 0,
+        mpCostOffsetY = 0,
+        showQuantity = true,
+        showStackQuantity = false,
+        quantityAnchor = 'bottomRight',
+        quantityOffsetX = 0,
+        quantityOffsetY = 0,
+        hotbarNumberOffsetX = 0,
+        hotbarNumberOffsetY = 0,
+
+        -- Skillchain highlight settings
+        skillchainHighlightEnabled = true,      -- Show skillchain highlight on WS slots
+        skillchainHighlightColor = 0xFFD4AA44,  -- Gold color for highlight border (ARGB)
+        skillchainIconScale = 1.0,              -- Scale multiplier for icon (0.5-2.0)
+        skillchainIconOffsetX = 0,              -- X offset in pixels
+        skillchainIconOffsetY = 0,              -- Y offset in pixels
+    
+        -- Cooldown timer settings
+        recastTimerFontSize = 11,               -- Font size for cooldown timer display
+        recastTimerFontColor = 0xFFFFFFFF,      -- Color for cooldown timer text
+        useHHMMCooldownFormat = false,          -- Use Hh:MM format (e.g., "1h:49") instead of "1h 49m"
+        flashCooldownUnder5 = false,            -- Flash cooldown timer text when remaining time is under 5 seconds
+    };
+end
+
+-- Factory function to create per-hotbar settings with overrides
+-- Each hotbar (1-6) can have independent layout and visual settings
+function M.createHotbarBarDefaults(overrides)
+    local defaults = T{
+        -- Global settings toggle (when true, uses hotbarGlobal settings for visuals)
+        useGlobalSettings = true,
+
+        -- Job-specific toggle (when true, actions are stored per-job; when false, actions are shared across all jobs)
+        jobSpecific = true,
+
+        -- Pet-aware toggle (when true, hotbar can have different palettes per pet for SMN/BST/DRG/PUP)
+        petAware = false,
+        showPetIndicator = true,  -- Show indicator dot when petAware is enabled
+
+        -- Layout settings (always per-bar)
+        enabled = true,
+        anchoredInStack = true,  -- Include in bottom-up stack when positionMode is anchored
+        rows = 1,               -- Number of rows (1-12)
+        columns = 12,           -- Number of columns (1-12)
+        slots = 12,             -- Total slots, auto-calculated from rows*columns
+
+        -- Visual settings (used when useGlobalSettings = false)
+        slotSize = 48,          -- Slot size in pixels
+        bgScale = 1.0,
+        borderScale = 1.0,
+        backgroundOpacity = 0.87,
+        borderOpacity = 1.0,
+        backgroundTheme = '-None-',
+        showHotbarNumber = true,
+        showSlotFrame = false,
+        customFramePath = '',       -- Custom frame image path (empty = use default)
+        showActionLabels = false,
+        actionLabelOffsetX = 0,     -- X offset for action labels
+        actionLabelOffsetY = 0,     -- Y offset for action labels
+        hideEmptySlots = false,     -- Hide slots with no action assigned
+
+        -- Slot padding (gap between slots)
+        slotXPadding = 8,       -- Horizontal gap between slots
+        slotYPadding = 6,       -- Vertical gap between rows
+
+        -- Gap between window background edge and slot grid (used when bar overrides global visuals)
+        backgroundPaddingX = 0,
+        backgroundPaddingY = 0,
+
+        -- Slot appearance
+        slotBackgroundColor = 0x55000000,  -- ARGB color for slot backgrounds (black at 33% opacity)
+        slotOpacity = 1.0,                 -- Opacity multiplier for slot.png (0.0-1.0)
+
+        -- Window colors (per-bar)
+        bgColor = 0xFFFFFFFF,              -- Background color tint (ARGB)
+        borderColor = 0xFFFFFFFF,          -- Border color tint (ARGB)
+
+        -- Font settings
+        keybindFontSize = 8,
+        keybindFontColor = 0xFFFFFFFF,     -- Keybind text color (ARGB)
+        labelFontSize = 10,
+        labelFontColor = 0xFFFFFFFF,       -- Action label text color (ARGB)
+        labelCooldownColor = 0xFF888888,   -- Action label color when on cooldown (grey)
+        labelNoMpColor = 0xFFFF4444,       -- Action label color when not enough MP (red)
+        
+        -- Text position settings
+        showKeybinds = true,
+        keybindAnchor = 'topLeft',         -- topLeft, topRight, bottomLeft, bottomRight
+        keybindOffsetX = 0,
+        keybindOffsetY = 0,
+        showMpCost = true,
+        mpCostAnchor = 'topRight',
+        mpCostOffsetX = 0,
+        mpCostOffsetY = 0,
+        showQuantity = true,
+        showStackQuantity = false,
+        quantityAnchor = 'bottomRight',
+        quantityOffsetX = 0,
+        quantityOffsetY = 0,
+        hotbarNumberOffsetX = 0,
+        hotbarNumberOffsetY = 0,
+
+        -- Keybind assignments per job (nil = use job file defaults)
+        -- Structure: keybinds[jobId][slotIndex] = { type, action, target, display }
+        keybinds = nil,
+
+        -- Keyboard shortcut bindings per slot (not job-specific)
+        -- Structure: keyBindings[slotIndex] = { key = virtualKeyCode, ctrl = bool, alt = bool, shift = bool }
+        keyBindings = {},
+
+        -- Palette ordering for user-defined palettes (per job:subjob combination)
+        -- Structure: paletteOrder['{jobId}:{subjobId}'] = { 'paletteName1', 'paletteName2', ... }
+        -- Palettes are displayed in this order; missing palettes are appended alphabetically
+        paletteOrder = {},
+    };
+    if overrides then
+        for k, v in pairs(overrides) do
+            defaults[k] = v;
+        end
+        -- Auto-calculate slots if rows/columns changed but slots wasn't explicitly set
+        if (overrides.rows or overrides.columns) and not overrides.slots then
+            defaults.slots = defaults.rows * defaults.columns;
+        end
+    end
+    return defaults;
+end
+
+-- Factory function to create crossbar settings (controller-based hotbar layout)
+-- The crossbar provides 4 combo modes: L2, R2, L2+R2, R2+L2 (32 total slots)
+function M.createCrossbarDefaults()
+    return T{
+        -- Layout mode: 'hotbar', 'crossbar', or 'both'
+        mode = 'hotbar',
+
+        -- Job-specific toggle (when true, actions are stored per-job; when false, actions are shared across all jobs)
+        jobSpecific = true,
+
+        -- Per-combo-mode settings (pet-aware is per-combo, palettes are GLOBAL)
+        -- NOTE: activePalette was removed - crossbar palettes are now global (see palette.lua state.crossbarActivePalette)
+        comboModeSettings = {
+            L2 = { petAware = false },
+            R2 = { petAware = false },
+            L2R2 = { petAware = false },
+            R2L2 = { petAware = false },
+            L2x2 = { petAware = false },
+            R2x2 = { petAware = false },
+        },
+
+        -- Layout
+        slotSize = 40,              -- Slot size in pixels
+        slotGapV = 2,               -- Vertical gap between top and bottom slots
+        slotGapH = 2,               -- Horizontal gap between left and right slots
+        diamondSpacing = 16,        -- Space between dpad and face button diamonds
+        groupSpacing = 24,          -- Space between L2 and R2 groups
+        showDivider = true,         -- Show center divider line
+        showTriggerLabels = true,   -- Show L2/R2 trigger icons
+
+        -- Visual settings
+        backgroundTheme = '-None-',
+        bgScale = 1.0,
+        borderScale = 1.0,
+        backgroundOpacity = 0.10,
+        borderOpacity = 1.0,
+        slotBackgroundColor = 0x55000000,
+        slotOpacity = 1.0,                  -- Opacity multiplier for slot.png (0.0-1.0)
+        activeSlotHighlight = 0x44FFFFFF,   -- Highlight color when trigger held
+        inactiveSlotDim = 0.5,              -- Dim multiplier for inactive side
+
+        -- Display mode
+        displayMode = 'normal',             -- 'normal', 'activeOnly', or 'combatOnly'
+        fadeAnimationDuration = 0.15,       -- Fade in/out duration for visibility-managed modes
+        combatTriggerReleaseDelay = 5.0,    -- Seconds to keep combatOnly visible after L2/R2 release
+
+        -- Window colors
+        bgColor = 0xFFFFFFFF,
+        borderColor = 0xFFFFFFFF,
+
+        -- Button icons
+        showButtonIcons = true,             -- Show d-pad/face button icons on slots
+        buttonIconSize = 16,                -- Size of controller button icons
+        buttonIconGapH = 8,                 -- Horizontal spacing between center icons
+        buttonIconGapV = 2,                 -- Vertical spacing between center icons
+        buttonIconPosition = 'corner',      -- 'corner' or 'replace_keybind'
+        controllerTheme = 'Xbox',           -- 'PlayStation', 'Xbox', or 'Nintendo' button icons
+        controllerScheme = 'xbox',          -- Controller profile: 'xbox', 'dualsense', 'switchpro', 'dinput'
+        triggerIconScale = 0.8,             -- Scale for L2/R2 trigger icons (base 49x28)
+
+        -- Font settings
+        keybindFontSize = 8,
+        keybindFontColor = 0xFFFFFFFF,
+        labelFontSize = 10,
+        triggerLabelFontSize = 14,
+        triggerLabelColor = 0xFFFFCC00,     -- Gold color for trigger labels
+
+        -- MP cost display
+        showMpCost = true,                  -- Show MP cost on spell slots
+        mpCostFontSize = 10,                -- Font size for MP cost
+        mpCostFontColor = 0xFFD4FF97,       -- MP cost text color
+        mpCostNoMpColor = 0xFFFF4444,       -- MP cost color when not enough MP
+        mpCostOffsetX = 0,                  -- X offset for MP cost position
+        mpCostOffsetY = 0,                  -- Y offset for MP cost position
+
+        -- Item quantity display
+        showQuantity = true,                -- Show item quantity on item slots
+        showStackQuantity = false,          -- Show full-stack count above the item quantity
+        quantityFontSize = 10,              -- Font size for item quantity
+        quantityFontColor = 0xFFFFFFFF,     -- Item quantity text color
+        quantityOffsetX = 0,                -- X offset for quantity position
+        quantityOffsetY = 0,                -- Y offset for quantity position
+
+        -- Combo text (shows current mode in center for complex combos)
+        showComboText = true,               -- Show combo mode text in center
+        comboTextFontSize = 10,             -- Font size for combo text
+        comboTextOffsetX = 0,               -- X offset for combo text position
+        comboTextOffsetY = 0,               -- Y offset for combo text position
+
+        -- Palette name display (shows current palette and index, e.g., "Stuns (2/5)")
+        showPaletteName = false,            -- Toggle to show palette name
+        paletteNameFontSize = 10,           -- Font size for palette name
+        paletteNameOffsetX = 0,             -- X offset for position
+        paletteNameOffsetY = 0,             -- Y offset for position
+
+        -- Expanded crossbar (L2+R2 combos)
+        enableExpandedCrossbar = true,      -- Enable L2+R2 and R2+L2 combos
+        useSharedExpandedBar = false,       -- When true, L2+R2 and R2+L2 share the same bar (Shared)
+
+        -- Double-tap crossbar (tap trigger twice quickly)
+        enableDoubleTap = false,            -- Enable L2x2 and R2x2 double-tap modes
+        doubleTapWindow = 0.3,              -- Time window for double-tap detection (seconds)
+
+        -- Analog trigger thresholds (0-255 normalized range)
+        -- Used by Xbox (XInput) and PlayStation (DirectInput with signed->unsigned conversion)
+        triggerPressThreshold = 30,         -- Trigger value to register as pressed
+        triggerReleaseThreshold = 15,       -- Trigger value to register as released (hysteresis)
+
+        -- Minimum trigger hold time for double-tap detection (debounce)
+        -- Prevents analog jitter from causing false double-taps
+        minTriggerHold = 0.05,              -- Seconds (default 50ms)
+
+        -- Window position (saved on drag)
+        windowX = nil,                      -- nil = use default centered position
+        windowY = nil,
+
+        -- Cooldown timer settings
+        recastTimerFontSize = 11,               -- Font size for cooldown timer display
+        recastTimerFontColor = 0xFFFFFFFF,      -- Color for cooldown timer text
+        useHHMMCooldownFormat = false,          -- Use Hh:MM format (e.g., "1h:49") instead of "1h 49m"
+        flashCooldownUnder5 = false,            -- Flash cooldown timer text when remaining time is under 5 seconds
+
+        -- Per-job slot actions for each combo mode
+        -- slotActions[jobId][comboMode][slotIndex] = action
+        -- comboMode: 'L2', 'R2', 'L2R2', 'R2L2'
+        -- slotIndex: 1-8 (1-4 = d-pad, 5-8 = face buttons)
+        slotActions = {},
+
+        -- Crossbar palette order (separate from hotbar palettes)
+        -- Structure: crossbarPaletteOrder['{jobId}:{subjobId}'] = { 'paletteName1', 'paletteName2', ... }
+        -- Note: Crossbar palettes are independent from hotbar palettes
+        crossbarPaletteOrder = {},
+    };
+end
+
 return M;

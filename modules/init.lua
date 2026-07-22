@@ -20,6 +20,7 @@ modules.notifications = require('modules.notifications.init');
 modules.treasurepool = require('modules.treasurepool.init');
 modules.bovinelatent = require('modules.bovinelatent.bovinelatent');
 modules.bovinededication = require('modules.bovinededication.bovinededication');
+modules.hotbar = require('modules.hotbar.init');
 
 -- Self-registering side-effect module (no Initialize/DrawWindow/etc.).
 -- Registers its own load/present/unload Ashita event callbacks under unique

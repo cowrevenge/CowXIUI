@@ -6,11 +6,16 @@
 require('common');
 require('handlers.helpers');
 local imgui = require('imgui');
+local ffi = require('ffi');
 
 local components = {};
 
 -- Column spacing for horizontal color picker layouts
 components.COLOR_COLUMN_SPACING = 200;
+
+-- Indent width used by grouped sub-option blocks (hotbar "hide when menu open"
+-- sub-options, etc.). Matches upstream XIUI's value.
+components.INDENT_SIZE = 20;
 
 -- List of common Windows fonts
 components.available_fonts = {
@@ -661,6 +666,131 @@ function components.DrawPartyColorPicker(partyTable, label, configKey, helpText,
     if (imgui.IsItemDeactivatedAfterEdit()) then SaveSettingsToDisk(); end
 
     if helpText then imgui.ShowHelp(helpText); end
+end
+
+-- ============================================================================
+-- Hotbar config panel helpers
+--
+-- Ported from upstream XIUI (tirem/XIUI) config/components.lua so the hotbar
+-- settings panel (config/hotbar.lua) has the helpers it calls. Kept byte-for-
+-- byte where possible; DrawPartySliderInt drops the forced item width to match
+-- this fork's DrawPartySlider (which sets no width), avoiding a dependency on
+-- the upstream CONTENT_MAX_WIDTH local.
+-- ============================================================================
+
+-- Draw a small square icon button with a texture overlay + optional tooltip.
+-- Returns true when clicked.
+function components.DrawIconButton(id, texture, size, tooltipText)
+    size = size or 22;
+    local clicked = false;
+    local drawList = imgui.GetWindowDrawList();
+
+    local cursorPos = {imgui.GetCursorScreenPos()};
+
+    imgui.PushStyleColor(ImGuiCol_Button, {0.15, 0.14, 0.12, 1.0});
+    imgui.PushStyleColor(ImGuiCol_ButtonHovered, {0.25, 0.23, 0.18, 1.0});
+    imgui.PushStyleColor(ImGuiCol_ButtonActive, {0.3, 0.27, 0.2, 1.0});
+
+    if imgui.Button(id, {size, size}) then
+        clicked = true;
+    end
+
+    imgui.PopStyleColor(3);
+
+    if texture and texture.image and drawList then
+        local iconPtr = tonumber(ffi.cast("uint32_t", texture.image));
+        if iconPtr then
+            local padding = 2;
+            drawList:AddImage(
+                iconPtr,
+                {cursorPos[1] + padding, cursorPos[2] + padding},
+                {cursorPos[1] + size - padding, cursorPos[2] + size - padding}
+            );
+        end
+    end
+
+    if imgui.IsItemHovered() and tooltipText then
+        imgui.BeginTooltip();
+        imgui.Text(tooltipText);
+        imgui.EndTooltip();
+    end
+
+    return clicked;
+end
+
+-- Draw inline X/Y offset integer inputs on a single row.
+function components.DrawInlineOffsets(settings, idSuffix, xKey, yKey, width)
+    width = width or 40;
+
+    imgui.Text('X:');
+    imgui.SameLine();
+    imgui.SetNextItemWidth(width);
+    local xVal = { settings[xKey] or 0 };
+    if imgui.InputInt('##' .. xKey .. idSuffix, xVal, 0, 0) then
+        settings[xKey] = xVal[1];
+        SaveSettingsOnly();
+    end
+
+    imgui.SameLine();
+    imgui.Text('Y:');
+    imgui.SameLine();
+    imgui.SetNextItemWidth(width);
+    local yVal = { settings[yKey] or 0 };
+    if imgui.InputInt('##' .. yKey .. idSuffix, yVal, 0, 0) then
+        settings[yKey] = yVal[1];
+        SaveSettingsOnly();
+    end
+end
+
+-- Draw the "Hide When Menu Open" checkbox and its dependent sub-options.
+function components.DrawHideWhenMenuOpenOptions(hideOnMenuFocusKey, hideMacroPaletteKey, hideOnlyAllianceKey)
+    components.DrawCheckbox('Hide When Menu Open', hideOnMenuFocusKey);
+    imgui.ShowHelp('Hide this module when a game menu is open (equipment, map, etc.).');
+
+    if not gConfig[hideOnMenuFocusKey] then
+        return;
+    end
+
+    local showMacroPaletteOption = hideMacroPaletteKey
+        and not (gConfig.hotbarGlobal and gConfig.hotbarGlobal.disableMacroBars);
+    if not showMacroPaletteOption and not hideOnlyAllianceKey then
+        return;
+    end
+
+    imgui.Indent(components.INDENT_SIZE);
+    if showMacroPaletteOption then
+        components.DrawCheckbox('Keep Macro Palette Visible', hideMacroPaletteKey);
+        imgui.ShowHelp('Keep this module visible when the in-game macro palette is open.');
+    end
+    if hideOnlyAllianceKey then
+        components.DrawCheckbox('Hide Only Alliance', hideOnlyAllianceKey);
+        imgui.ShowHelp('Keep main party visible when a game menu is open (equipment, map, etc.).');
+    end
+    imgui.Unindent(components.INDENT_SIZE);
+end
+
+-- Integer slider bound to a party/sub-table key with deferred disk save.
+function components.DrawPartySliderInt(partyTable, label, configKey, min, max, format, callback, default)
+    local defaultValue = default or min;
+    local currentValue = partyTable[configKey];
+    if currentValue == nil then
+        currentValue = defaultValue;
+        partyTable[configKey] = defaultValue;
+    end
+    local value = { math.floor(currentValue) };
+    local uniqueLabel = label .. '##party_' .. configKey;
+
+    local changed = imgui.SliderInt(uniqueLabel, value, min, max, format, ImGuiSliderFlags_AlwaysClamp);
+
+    if changed then
+        partyTable[configKey] = value[1];
+        if callback then callback() end
+        UpdateUserSettings();
+    end
+
+    if (imgui.IsItemDeactivatedAfterEdit()) then
+        SaveSettingsToDisk();
+    end
 end
 
 return components;
