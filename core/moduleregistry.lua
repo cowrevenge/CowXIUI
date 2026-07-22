@@ -76,6 +76,19 @@ end
 
 -- Registry API --------------------------------------------------------------
 function M.Register(name, config)
+    -- Guard against a nil module. This happens when XIUI.lua registers a module
+    -- (module = uiMods.X) but modules/init.lua wasn't updated to require it, so
+    -- uiMods.X is nil. Without this guard the nil module survives into
+    -- InitializeAll and every entry.module.X deref crashes. Skip + warn instead
+    -- so a partial file copy fails loud but soft, naming the culprit.
+    if config == nil or config.module == nil then
+        print(string.format(
+            '[XIUI] Skipping module registration for "%s": module is nil. '
+            .. 'Likely a partial file copy -- make sure modules/init.lua '
+            .. 'requires it and the module file is present.',
+            tostring(name)));
+        return;
+    end
     registry[name] = config;
 end
 

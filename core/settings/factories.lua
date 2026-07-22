@@ -372,7 +372,7 @@ function M.createHotbarGlobalDefaults()
         borderScale = 1.0,
         backgroundOpacity = 0.87,
         borderOpacity = 1.0,
-        backgroundTheme = '-None-',
+        backgroundTheme = 'Window1',
         showHotbarNumber = true,
         showSlotFrame = false,
         customFramePath = '',   -- Custom frame image path (empty = use default)
@@ -467,7 +467,7 @@ function M.createHotbarBarDefaults(overrides)
         borderScale = 1.0,
         backgroundOpacity = 0.87,
         borderOpacity = 1.0,
-        backgroundTheme = '-None-',
+        backgroundTheme = 'Window1',
         showHotbarNumber = true,
         showSlotFrame = false,
         customFramePath = '',       -- Custom frame image path (empty = use default)
@@ -573,7 +573,7 @@ function M.createCrossbarDefaults()
         showTriggerLabels = true,   -- Show L2/R2 trigger icons
 
         -- Visual settings
-        backgroundTheme = '-None-',
+        backgroundTheme = 'Window1',
         bgScale = 1.0,
         borderScale = 1.0,
         backgroundOpacity = 0.10,

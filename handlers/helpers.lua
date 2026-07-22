@@ -33,10 +33,55 @@ local windowBackgroundLib = require('libs.windowbackground');
 local statusHandler = require('handlers.statushandler');
 local buffTable = require('libs.bufftable');
 
+-- imgui is needed by the window-position helpers below (Save/ApplyWindowPosition).
+local imgui = require('imgui');
+
 -- ========================================
 -- Global Exports for Backwards Compatibility
 -- ========================================
 -- These expose functions globally so existing code continues to work
+
+-- ========================================
+-- Window Positioning Helpers (ported from upstream XIUI, tirem/XIUI)
+-- Required by modules/hotbar/display.lua and crossbar.lua, which persist and
+-- restore per-window positions via these globals. Self-contained: only touch
+-- gConfig and imgui.
+-- ========================================
+
+-- Apply a saved window position ONCE (before imgui.Begin) per window name.
+-- Returns true if a position was applied this call.
+function ApplyWindowPosition(windowName)
+    if (gConfig and gConfig.windowPositions and gConfig.windowPositions[windowName]) then
+        if (not gConfig.appliedPositions) then gConfig.appliedPositions = {}; end
+
+        if (not gConfig.appliedPositions[windowName]) then
+            local pos = gConfig.windowPositions[windowName];
+            imgui.SetNextWindowPos({ pos.x, pos.y }, ImGuiCond_Always);
+            gConfig.appliedPositions[windowName] = true;
+            return true;
+        end
+    end
+    return false;
+end
+
+-- Capture the current window position into the profile. Call AFTER imgui.Begin().
+-- Only writes when the position actually changed (reduces settings churn).
+function SaveWindowPosition(windowName)
+    if (not gConfig) then return; end
+
+    local x, y = imgui.GetWindowPos();
+
+    if (not gConfig.windowPositions) then gConfig.windowPositions = {}; end
+
+    local saved = gConfig.windowPositions[windowName];
+
+    if (not saved) then
+        gConfig.windowPositions[windowName] = { x = x, y = y };
+    elseif (saved.x ~= x or saved.y ~= y) then
+        saved.x = x;
+        saved.y = y;
+    end
+end
 
 -- Entity Constants (from entity.lua)
 SPAWN_FLAG_PLAYER = entityLib.SPAWN_FLAG_PLAYER;

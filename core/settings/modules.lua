@@ -779,6 +779,12 @@ function M.createModuleDefaults()
         bovinededicationSettings = T{
         },
 
+        -- settings for the combat-round timers (bovinecombat). Empty for now;
+        -- the module keeps its own volatile timestamps. Present so the registry
+        -- can pass gAdjustedSettings[settingsKey] to Initialize.
+        bovinecombatSettings = T{
+        },
+
     };
 end
 

@@ -39,6 +39,7 @@ require('handlers.imgui_compat');
 
 require('common');
 local settings = require('settings');
+local chat = require('chat');
 local gdi = require('submodules.gdifonts.include');
 
 -- Core modules
@@ -69,6 +70,7 @@ local notifications = uiMods.notifications;
 local treasurePool = uiMods.treasurepool;
 local bovinelatent = uiMods.bovinelatent;
 local bovinededication = uiMods.bovinededication;
+local bovinecombat = uiMods.bovinecombat;
 local hotbar = uiMods.hotbar;
 -- Hotbar helper modules used directly from XIUI.lua (packet routing, palette
 -- persistence, skillchain WS highlighting, deferred slot tooltip flush).
@@ -275,6 +277,12 @@ uiModules.Register('bovinededication', {
     module = bovinededication,
     settingsKey = 'bovinededicationSettings',
     configKey = 'showBovinededication',
+    hasSetHidden = true,
+});
+uiModules.Register('bovinecombat', {
+    module = bovinecombat,
+    settingsKey = 'bovinecombatSettings',
+    configKey = 'showBovinecombat',
     hasSetHidden = true,
 });
 
@@ -484,8 +492,13 @@ ashita.events.register('d3d_present', 'present_cb', function ()
             local key = tostring(err);
             if not _xiuiPendingVisualErrLogged[key] then
                 _xiuiPendingVisualErrLogged[key] = true;
-                print(chat.header('XIUI'):append(chat.error(
-                    'pendingVisualUpdate error: ' .. tostring(err))));
+                local okp = pcall(function()
+                    print(chat.header('XIUI'):append(chat.error(
+                        'pendingVisualUpdate error: ' .. tostring(err))));
+                end);
+                if not okp then
+                    print('[XIUI] pendingVisualUpdate error: ' .. tostring(err));
+                end
             end
         end
     end
@@ -502,8 +515,15 @@ ashita.events.register('d3d_present', 'present_cb', function ()
             local key = tostring(err);
             if not _xiuiConfigMenuErrLogged[key] then
                 _xiuiConfigMenuErrLogged[key] = true;
-                print(chat.header('XIUI'):append(chat.error(
-                    'configMenu error: ' .. tostring(err))));
+                -- Print via chat if available, else fall back to plain print so
+                -- the handler itself can never crash the present loop.
+                local okp = pcall(function()
+                    print(chat.header('XIUI'):append(chat.error(
+                        'configMenu error: ' .. tostring(err))));
+                end);
+                if not okp then
+                    print('[XIUI] configMenu error: ' .. tostring(err));
+                end
             end
         end
     end
@@ -564,6 +584,12 @@ end);
 
 ashita.events.register('load', 'load_cb', function ()
     UpdateUserSettings();
+
+    -- Reset the applied-positions guard so every window re-applies its saved
+    -- position once after a load/reload. ApplyWindowPosition() (handlers/
+    -- helpers.lua) flips each entry to true after applying; without this reset
+    -- the guard stays true across reloads and hotbar windows never restore.
+    if gConfig then gConfig.appliedPositions = {}; end
 
     -- Populate the ImGui font atlas now, before the first d3d_present, so no
     -- font selection in the hotbar/config has to mutate the atlas mid-frame

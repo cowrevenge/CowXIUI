@@ -574,7 +574,67 @@ end
 
 -- Anchor dropdown (left/right only, no center)
 -- Use for positioning elements relative to a container edge
-function components.DrawAnchorDropdown(label, parentTable, configKey, helpText)
+-- Four-corner anchor options + labels, used by the hotbar keybind/mp/quantity
+-- anchor dropdowns (ported from upstream XIUI).
+components.ANCHOR_OPTIONS = { 'topLeft', 'topRight', 'bottomLeft', 'bottomRight' };
+components.ANCHOR_LABELS = {
+    topLeft = 'Top Left',
+    topRight = 'Top Right',
+    bottomLeft = 'Bottom Left',
+    bottomRight = 'Bottom Right',
+};
+
+-- DrawAnchorDropdown supports TWO call conventions, disambiguated by the type
+-- of the first argument, because this fork and the upstream hotbar call it
+-- differently:
+--
+--   (A) Fork / enemylist style  -- first arg is a STRING label:
+--         DrawAnchorDropdown(label, parentTable, configKey, helpText)
+--       Simple Left/Right anchor with a visible label + help text.
+--
+--   (B) Upstream / hotbar style -- first arg is a TABLE (settings):
+--         DrawAnchorDropdown(settings, idSuffix, anchorKey, width)
+--       Four-corner anchor (topLeft/topRight/bottomLeft/bottomRight), no label,
+--       fixed pixel width. This is what config/hotbar.lua uses for the
+--       keybind / mp-cost / quantity anchor pickers.
+--
+-- Previously the fork only had (A); the hotbar's (B) calls fell through and
+-- indexed a string with the anchorKey, throwing
+-- "String type does not contain a definition for: keybindAnchor".
+function components.DrawAnchorDropdown(a, b, c, d)
+    if type(a) == 'table' then
+        -- (B) upstream/hotbar 4-corner style: (settings, idSuffix, anchorKey, width)
+        local settings = a;
+        local idSuffix = b or '';
+        local anchorKey = c;
+        local width = d or 90;
+
+        local currentAnchor = settings[anchorKey] or 'topLeft';
+        local currentLabel = components.ANCHOR_LABELS[currentAnchor] or 'Top Left';
+
+        imgui.SetNextItemWidth(width);
+        if imgui.BeginCombo('##' .. tostring(anchorKey) .. tostring(idSuffix), currentLabel) then
+            for _, anchor in ipairs(components.ANCHOR_OPTIONS) do
+                local isSelected = (anchor == currentAnchor);
+                if imgui.Selectable(components.ANCHOR_LABELS[anchor], isSelected) then
+                    settings[anchorKey] = anchor;
+                    SaveSettingsOnly();
+                end
+                if isSelected then
+                    imgui.SetItemDefaultFocus();
+                end
+            end
+            imgui.EndCombo();
+        end
+        return;
+    end
+
+    -- (A) fork/enemylist Left/Right style: (label, parentTable, configKey, helpText)
+    local label = a;
+    local parentTable = b;
+    local configKey = c;
+    local helpText = d;
+
     local anchorLabels = {
         left = 'Left',
         right = 'Right'
@@ -609,6 +669,50 @@ components.TAB_STYLE = {
     bgLight = {0.137, 0.125, 0.106, 1.0},
     bgLighter = {0.176, 0.161, 0.137, 1.0},
 };
+
+-- ============================================================================
+-- Window style push/pop (ported from upstream XIUI, tirem/XIUI)
+-- Used by config/palettemanager.lua to theme its standalone window. Push and
+-- Pop must stay a matched pair: 21 style colors + 5 style vars.
+-- ============================================================================
+local WINDOW_STYLE_BG_DARK = {0.067, 0.063, 0.055, 0.95};
+local WINDOW_STYLE_BORDER  = {0.3, 0.28, 0.24, 0.8};
+local WINDOW_STYLE_TEXT    = {0.9, 0.9, 0.9, 1.0};
+
+function components.PushWindowStyle()
+    local s = components.TAB_STYLE;
+    imgui.PushStyleColor(ImGuiCol_WindowBg, WINDOW_STYLE_BG_DARK);
+    imgui.PushStyleColor(ImGuiCol_ChildBg, WINDOW_STYLE_BG_DARK);
+    imgui.PushStyleColor(ImGuiCol_PopupBg, WINDOW_STYLE_BG_DARK);
+    imgui.PushStyleColor(ImGuiCol_TitleBg, s.bgMedium);
+    imgui.PushStyleColor(ImGuiCol_TitleBgActive, s.bgLight);
+    imgui.PushStyleColor(ImGuiCol_Border, WINDOW_STYLE_BORDER);
+    imgui.PushStyleColor(ImGuiCol_Button, s.bgMedium);
+    imgui.PushStyleColor(ImGuiCol_ButtonHovered, s.bgLight);
+    imgui.PushStyleColor(ImGuiCol_ButtonActive, s.bgLighter);
+    imgui.PushStyleColor(ImGuiCol_FrameBg, WINDOW_STYLE_BG_DARK);
+    imgui.PushStyleColor(ImGuiCol_FrameBgHovered, s.bgMedium);
+    imgui.PushStyleColor(ImGuiCol_FrameBgActive, s.bgLight);
+    imgui.PushStyleColor(ImGuiCol_Header, s.bgMedium);
+    imgui.PushStyleColor(ImGuiCol_HeaderHovered, s.bgLight);
+    imgui.PushStyleColor(ImGuiCol_HeaderActive, s.bgLighter);
+    imgui.PushStyleColor(ImGuiCol_Separator, WINDOW_STYLE_BORDER);
+    imgui.PushStyleColor(ImGuiCol_Text, WINDOW_STYLE_TEXT);
+    imgui.PushStyleColor(ImGuiCol_ScrollbarBg, WINDOW_STYLE_BG_DARK);
+    imgui.PushStyleColor(ImGuiCol_ScrollbarGrab, s.bgLight);
+    imgui.PushStyleColor(ImGuiCol_ScrollbarGrabHovered, s.bgLighter);
+    imgui.PushStyleColor(ImGuiCol_ScrollbarGrabActive, s.gold);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 4);
+    imgui.PushStyleVar(ImGuiStyleVar_FrameRounding, 3);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
+    imgui.PushStyleVar(ImGuiStyleVar_FramePadding, {6, 4});
+    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, {8, 6});
+end
+
+function components.PopWindowStyle()
+    imgui.PopStyleVar(5);
+    imgui.PopStyleColor(21);
+end
 
 -- Helper: Draw a styled tab button with underline when selected
 -- Returns true if tab was clicked, and the calculated tab width
