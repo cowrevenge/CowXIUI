@@ -1169,10 +1169,15 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
 
     -- Draw selection box
     if (memInfo.targeted == true or memInfo.subTargeted) then
-        -- Layout 1: use the global foreground draw list so the box is unclipped
-        -- (the window draw list clips to the content rect and cuts the box's side
-        -- halo). Other layouts keep the background list, which lines up correctly.
-        local drawList = (layout == 1) and imgui.GetForegroundDrawList() or imgui.GetBackgroundDrawList();
+        -- Layouts 0 and 1 use the global foreground draw list.
+        --
+        -- Layout 1 needs it so the box is unclipped (the window draw list clips
+        -- to the content rect and cuts the box's side halo). Layout 0 needs it
+        -- because the target bar panel is drawn over the party window, and the
+        -- BACKGROUND draw list renders beneath that panel -- so the selection
+        -- box was there but hidden behind it.
+        local drawList = (layout == 1 or layout == 0)
+            and imgui.GetForegroundDrawList() or imgui.GetBackgroundDrawList();
 
         local selectionWidth = allBarsLengths + settings.cursorPaddingX1 + settings.cursorPaddingX2;
         local selectionScaleY = cache.selectionBoxScaleY or 1;
@@ -3450,7 +3455,24 @@ function display.DrawCurrentTarget(settings)
         local barRight = data.frameCache.playerHpBarRight;
         local tbarWidth;
         local barX;
-        if barLeft and barRight and barRight > barLeft then
+        if cache.layout == 0 then
+            -- HORIZONTAL EXCEPTION.
+            --
+            -- Every other layout matches this bar to the player's HP bar width,
+            -- which is right for them: in Compact / Super Compact the HP bar is
+            -- the dominant element and the target bar reads as a sibling of it.
+            --
+            -- In Horizontal the row is HP + MP + TP side by side, so matching
+            -- only the HP bar leaves the target bar as a short stub against a
+            -- much wider window. Span the window box instead -- but keep the
+            -- bar RIGHT-aligned and reserve a gutter on the left for the HP
+            -- percent, so a 3-digit "100" sits beside the bar instead of being
+            -- drawn on top of it.
+            local sideInset = 10;
+            local pctGutter = imgui.CalcTextSize('100') + 10;
+            barX      = wX + sideInset + pctGutter;
+            tbarWidth = winW - (sideInset * 2) - pctGutter;
+        elseif barLeft and barRight and barRight > barLeft then
             -- Captured geometry available - align pixel-perfect.
             tbarWidth = barRight - barLeft;
             barX      = barLeft;
@@ -3471,8 +3493,26 @@ function display.DrawCurrentTarget(settings)
 
         local barY = barTopY;
         imgui.SetCursorScreenPos({ barX, barY });
+
+        -- ProgressBar reduces the fillable area when bookends are enabled:
+        --   contentWidth = width - (bookendWidth * 2)
+        -- so a 100% target stops short of the bar's visible ends. tbarWidth is
+        -- matched pixel-for-pixel to the player's party HP bar, and that bar
+        -- gets the same reduction, so the two agree -- but the target bar reads
+        -- as "not full" because it is the one showing 100%.
+        --
+        -- Add the bookend allowance back so the fill spans the whole box.
+        -- Scoped to this call only: libs/progressbar.lua is shared by every
+        -- other bar and is deliberately left alone.
+        local tbarDrawWidth = tbarWidth;
+        if cache.showBookends then
+            local baseBookendWidth = (gConfig and gConfig.bookendSize) or 10;
+            local bookendW = math.max(baseBookendWidth, barHeight / 2);
+            tbarDrawWidth = tbarWidth + (bookendW * 2);
+        end
+
         progressbar.ProgressBar(
-            {{targetHPP, hpGradient}}, {tbarWidth, barHeight},
+            {{targetHPP, hpGradient}}, {tbarDrawWidth, barHeight},
             {decorate = cache.showBookends, backgroundGradientOverride = bgGradOverride}
         );
 
@@ -3489,6 +3529,8 @@ function display.DrawCurrentTarget(settings)
         end
         local pctStr  = string.format('%d', math.floor(targetHPP * 100));
         local pctW, _ = imgui.CalcTextSize(pctStr);
+        -- Right-aligned against the bar's left edge in every layout. Horizontal
+        -- reserves a gutter for this above, so there's room for a 3-digit value.
         outlined(barX - pctW - 6, textY, pctColor, pctStr);
 
         -- Name row ABOVE the bar (pushed in from the edge). Distance on the right.
