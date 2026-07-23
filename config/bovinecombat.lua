@@ -14,6 +14,8 @@ function M.DrawSettings()
     components.DrawCheckbox('Enabled', 'showBovinecombat', CheckVisibility);
     components.DrawCheckbox('Hidden Window', 'bovinecombatHidden', CheckVisibility);
     imgui.ShowHelp('When on, the timers window stays hidden. Re-enable it here.');
+    components.DrawCheckbox('Show Resting Tick Countdown', 'bovinecombatShowRestTick');
+    imgui.ShowHelp('Shows "Next Tick" countdown to the next resting HP/MP tick (first heal at 20s, then every 10s). Only counts while resting.');
 
     if components.CollapsingSection('Reset##bovinecombat') then
         if imgui.Button('Reset Timers##bovinecombat_reset') then
@@ -34,6 +36,10 @@ function M.DrawSettings()
         imgui.Spacing();
         imgui.TextDisabled('Multi-hit rounds (Double/Triple Attack)');
         imgui.TextDisabled('collapse into one round via a 0.35s window.');
+        imgui.Spacing();
+        imgui.Text('Next Tick counts down to the next resting');
+        imgui.Text('HP/MP tick (first heal 20s after you');
+        imgui.Text('start resting, then every 10s).');
     end
 end
 

@@ -30,7 +30,25 @@ local M = {};
 ---------------------------------------------------------------------
 
 local ENTITY_STATUS_ENGAGED = 1;
+local ENTITY_STATUS_RESTING = 33;
 local BURST_WINDOW_SEC       = 0.35;  -- collapse multi-hit rounds
+
+-- FFXI resting HP/MP tick cadence, per LSB (LandSandBoat) server source:
+--   0x0e8_camp.cpp creates the Healing status effect on /heal with
+--   tick = map.HEALING_TICK_DELAY (default 10s). The effect then ticks
+--   uniformly every 10s -- there is no special longer first interval.
+--   scripts/effects/healing.lua guards with `if healtime > 1`, so tick #1
+--   (at 10s) heals nothing; the FIRST ACTUAL HP/MP gain is tick #2 at 20s,
+--   then every 10s after.
+-- The timer is per-player and starts from your own /heal, not a global
+-- server tick, so counting from the Status 33 edge is correct.
+local REST_FIRST_TICK_SEC  = 20.0;
+local REST_CYCLE_SEC       = 10.0;
+
+-- Rest tracking state. rest_start_ts is os.clock() when resting began;
+-- was_resting gates the reset so we only stamp on the rising edge.
+local rest_start_ts = 0.0;
+local was_resting   = false;
 
 local hidden                = false;
 local text_event_registered = false;
@@ -76,6 +94,35 @@ local function is_engaged()
     if type(GetPlayerEntity) ~= 'function' then return false; end
     local ent = GetPlayerEntity();
     return ent ~= nil and ent.Status == ENTITY_STATUS_ENGAGED;
+end
+
+local function is_resting()
+    if type(GetPlayerEntity) ~= 'function' then return false; end
+    local ent = GetPlayerEntity();
+    return ent ~= nil and ent.Status == ENTITY_STATUS_RESTING;
+end
+
+-- Track the resting rising/falling edge and return seconds until the next
+-- HP/MP tick (nil when not resting). Called once per frame from DrawWindow.
+local function update_rest_state()
+    if not is_resting() then
+        was_resting = false;
+        return nil;
+    end
+
+    local t = now_sec();
+    if not was_resting then
+        rest_start_ts = t;
+        was_resting = true;
+    end
+
+    local elapsed = t - rest_start_ts;
+    if elapsed < REST_FIRST_TICK_SEC then
+        return REST_FIRST_TICK_SEC - elapsed;
+    end
+
+    local into_cycle = (elapsed - REST_FIRST_TICK_SEC) % REST_CYCLE_SEC;
+    return REST_CYCLE_SEC - into_cycle;
 end
 
 -- Normalize a raw log line: strip control/color/auto-translate bytes and
@@ -229,6 +276,8 @@ function M.Reset()
     last_defence_ts = 0.0;
     atk_round_seq   = 0;
     def_round_seq   = 0;
+    rest_start_ts   = 0.0;
+    was_resting     = false;
 end
 
 function M.DrawWindow(settings)
@@ -278,6 +327,26 @@ function M.DrawWindow(settings)
         end
         imgui.Text(format_elapsed(last_defence_ts));
         imgui.PopStyleColor();
+
+        -- Resting tick countdown. Only counts while resting (Status 33);
+        -- shows '--' otherwise. Toggleable from the Combat Timers config.
+        if not cfg or cfg.bovinecombatShowRestTick ~= false then
+            local secs_to_tick = update_rest_state();
+
+            imgui.Text('Next Tick:');
+            imgui.SameLine(110);
+            if secs_to_tick then
+                imgui.PushStyleColor(ImGuiCol_Text, { 0.35, 0.85, 1.0, 1.0 });
+                imgui.Text(string.format('%.1fs', secs_to_tick));
+            else
+                imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 0.55, 0.60, 1.0 });
+                imgui.Text('--');
+            end
+            imgui.PopStyleColor();
+        else
+            -- Keep edge tracking correct even while the row is hidden.
+            update_rest_state();
+        end
     end
     imgui.End();
 

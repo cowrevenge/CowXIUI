@@ -764,6 +764,14 @@ config.DrawWindow = function(us)
     end
 
     imgui.End();
+
+    -- Draw the hotbar import wizard (tHotBar/tCrossBar migration) after the main
+    -- config window so it overlays on top. migrationWizard.Draw() is a no-op
+    -- unless the wizard is open (opened via the Import button in the Hotbar tab).
+    if hotbarModule and hotbarModule.migrationWizard then
+        hotbarModule.migrationWizard.Draw();
+    end
+
     imgui.PopStyleVar(9);
     imgui.PopStyleColor(34);  -- 26 base + 5 tab colors + 3 resize grip colors
 end

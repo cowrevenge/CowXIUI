@@ -72,7 +72,15 @@ local lastInterpColorConfig = nil;
 local baseWindowFlags = nil;
 
 local playerbar = {
-	interpolation = {}
+	interpolation = {},
+	-- Resting tick tracker. Per LSB, the Healing effect ticks every 10s but the
+	-- first tick heals nothing, so the first actual HP/MP gain is at 20s, then
+	-- every 10s. startTime is the os.clock() when resting began;
+	-- wasResting gates the reset so we only stamp startTime on the rising edge.
+	restingTicker = {
+		startTime = 0,
+		wasResting = false,
+	},
 };
 
 -- Get cached interpolation colors, only recompute when config changes
@@ -347,6 +355,72 @@ playerbar.DrawWindow = function(settings)
 		-- Capture HP bar start position
 		local hpBarStartX, hpBarStartY = imgui.GetCursorScreenPos();
 		progressbar.ProgressBar(hpPercentData, {barSize, settings.barHeight}, {decorate = gConfig.showPlayerBarBookends});
+
+		-- Resting tick shimmer + countdown. Player Status 33 == resting/healing.
+		-- First heal lands 20s after resting starts, then every 10s. The shimmer is a
+		-- gradient wave that sweeps the HP bar as a visual countdown; the numeric
+		-- countdown-to-next-tick is drawn as standalone text near the player bar.
+		if playerEnt.Status == 33 then
+			local ticker = playerbar.restingTicker;
+			local tickerTime = os.clock();
+
+			if not ticker.wasResting then
+				ticker.startTime = tickerTime;
+				ticker.wasResting = true;
+			end
+
+			local elapsed = tickerTime - ticker.startTime;
+			-- Progress 0..1 through the current tick interval. Per LSB: the
+			-- Healing effect ticks every 10s, but tick #1 heals nothing
+			-- (healing.lua guards `healtime > 1`), so the first actual HP/MP
+			-- gain is at 20s, then every 10s. The numeric countdown lives in
+			-- the Combat Timers window.
+			local progress;
+			if elapsed < 20 then
+				progress = elapsed / 20;
+			else
+				local intoCycle = (elapsed - 20) % 10;
+				progress = intoCycle / 10;
+			end
+
+			-- Sweeping shimmer on the HP bar (optional, on by default).
+			if gConfig.playerBarRestingTicker ~= false then
+				local shimmerBookendWidth = gConfig.showPlayerBarBookends and (settings.barHeight / 2) or 0;
+				local padding = 3.0;
+				local width = barSize - shimmerBookendWidth * 2 - (padding * 2);
+				if width > 0 then
+					local waveWidth = width * 0.06;
+					local sx = hpBarStartX + shimmerBookendWidth + padding;
+					local y1 = hpBarStartY;
+					local y2 = hpBarStartY + settings.barHeight;
+					local waveLeft = sx + (progress * (width - waveWidth));
+					local waveRight = waveLeft + waveWidth;
+
+					local tickerColorInt = (gConfig.colorCustomization
+						and gConfig.colorCustomization.playerBar
+						and gConfig.colorCustomization.playerBar.restingTickerColor)
+						or 0xFF00E6FF;
+					local tc = argbIntToRgba(tickerColorInt);
+					local r, g, b, a = tc[1], tc[2], tc[3], tc[4];
+					local dl = imgui.GetForegroundDrawList();
+					if dl then
+						dl:AddRectFilledMultiColor(
+							{waveLeft, y1}, {waveRight, y2},
+							imgui.GetColorU32({r, g, b, 0.0}),
+							imgui.GetColorU32({r, g, b, a}),
+							imgui.GetColorU32({r, g, b, a}),
+							imgui.GetColorU32({r, g, b, 0.0})
+						);
+					end
+				end
+			end
+
+			-- Note: the numeric "next tick" countdown lives in the Combat Timers
+			-- window (modules/bovinecombat) now, not here. This block only draws
+			-- the shimmer.
+		else
+			playerbar.restingTicker.wasResting = false;
+		end
 
 		imgui.SameLine();
 		local hpEndX = imgui.GetCursorPosX();	

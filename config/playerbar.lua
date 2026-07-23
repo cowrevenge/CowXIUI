@@ -21,6 +21,8 @@ function M.DrawSettings()
         imgui.ShowHelp('Always display the MP Bar even if your current jobs cannot cast spells.');
         components.DrawCheckbox('TP Bar Flash Effects', 'playerBarTpFlashEnabled');
         imgui.ShowHelp('Flash effect when TP reaches 1000 or higher.');
+        components.DrawCheckbox('Resting Tick Shimmer', 'playerBarRestingTicker');
+        imgui.ShowHelp('Sweeping shimmer across the HP bar while resting, timed to the HP/MP tick (first heal at 20s, then every 10s). The numeric countdown is in the Combat Timers window.');
     end
 
     if components.CollapsingSection('Scale & Position##playerBar') then

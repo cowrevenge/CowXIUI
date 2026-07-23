@@ -1569,7 +1569,7 @@ end
 
 local function DrawVisualSettingsContent(settings, configKey)
     if components.CollapsingSection('Background##' .. configKey, false) then
-        local bgThemes = {'-None-', 'Plain', 'Window1', 'Window2', 'Window3', 'Window4', 'Window5', 'Window6', 'Window7', 'Window8'};
+        local bgThemes = {'-None-', 'Modern', 'Plain', 'Window1', 'Window2', 'Window3', 'Window4', 'Window5', 'Window6', 'Window7', 'Window8'};
         components.DrawPartyComboBox(settings, 'Theme##bg' .. configKey, 'backgroundTheme', bgThemes, DeferredUpdateVisuals);
         imgui.ShowHelp('Select the background window theme.');
 
@@ -2370,7 +2370,7 @@ local function DrawCrossbarSettings(selectedCrossbarTab)
 
             -- Background section
             if components.CollapsingSection('Background##crossbar', false) then
-                local bgThemes = {'-None-', 'Plain', 'Window1', 'Window2', 'Window3', 'Window4', 'Window5', 'Window6', 'Window7', 'Window8'};
+                local bgThemes = {'-None-', 'Modern', 'Plain', 'Window1', 'Window2', 'Window3', 'Window4', 'Window5', 'Window6', 'Window7', 'Window8'};
                 components.DrawPartyComboBox(crossbarSettings, 'Theme##bgcrossbar', 'backgroundTheme', bgThemes, DeferredUpdateVisuals);
                 imgui.ShowHelp('Select the background window theme.');
 

@@ -947,6 +947,40 @@ do
             borderColor   = number   -- ARGB tint (default 0xFFFFFFFF)
     ]]--
     function M.Draw(drawList, x, y, w, h, options)
+        options = options or {};
+
+        -- 'Modern' is CowXIUI's own flat rounded-panel style (matches the
+        -- Combat Timers window / bovinecombat and the general modern bar look),
+        -- rather than the FFXI Window textures. Drawn straight to the draw list,
+        -- no texture assets. Honors bgOpacity + bgColor/borderColor so it stays
+        -- customizable from the same hotbar/crossbar Background controls.
+        -- Only the hotbar + crossbar ever pass theme='Modern'; every other
+        -- caller of this function passes a texture theme, so this branch is
+        -- inert for them.
+        if options.theme == 'Modern' then
+            local opacity = options.bgOpacity or 0.9;
+            if opacity < 0 then opacity = 0; elseif opacity > 1 then opacity = 1; end
+
+            local DEFAULT_BG     = 0xE60F0F14;  -- ~90% dark navy fill
+            local DEFAULT_BORDER = 0x40FFFFFF;  -- faint white edge
+
+            local bgArgb = (options.bgColor and options.bgColor ~= 0xFFFFFFFF)
+                and options.bgColor or DEFAULT_BG;
+            local borderArgb = (options.borderColor and options.borderColor ~= 0xFFFFFFFF)
+                and options.borderColor or DEFAULT_BORDER;
+
+            -- Scale the fill alpha by the opacity slider.
+            local a = math.floor(((bit.band(bit.rshift(bgArgb, 24), 0xFF)) / 255) * opacity * 255 + 0.5);
+            bgArgb = bit.bor(bit.lshift(bit.band(a, 0xFF), 24), bit.band(bgArgb, 0x00FFFFFF));
+
+            local rounding = 6.0;
+            local tl = { x, y };
+            local br = { x + w, y + h };
+            drawList:AddRectFilled(tl, br, imgui.GetColorU32(ARGBToImGui(bgArgb)), rounding);
+            drawList:AddRect(tl, br, imgui.GetColorU32(ARGBToImGui(borderArgb)), rounding, 0, 1.0);
+            return;
+        end
+
         M.DrawBackground(drawList, x, y, w, h, options);
         M.DrawBorders(drawList, x, y, w, h, options);
     end

@@ -37,6 +37,7 @@ function M.createUserSettingsDefaults()
         bovinededicationHidden = false,
         showBovinecombat = true,
         bovinecombatHidden = false,
+        bovinecombatShowRestTick = true,
 
         -- Treasure Pool settings
         treasurePoolEnabled = true,           -- Show treasure pool when items in pool
@@ -207,6 +208,7 @@ function M.createUserSettingsDefaults()
         alwaysShowMpBar = true,
         playerBarTpFlashEnabled = true,
         playerBarHideDuringEvents = true,
+        playerBarRestingTicker = true,      -- sweeping tick shimmer on HP bar while resting
         playerBarHpDisplayMode = 'number', -- 'number', 'percent', 'both', 'both_percent_first', 'current_max'
         playerBarMpDisplayMode = 'number', -- 'number', 'percent', 'both', 'both_percent_first', 'current_max'
         showMpCostPreview = true, -- Show spell MP cost preview on MP bars when hovering spells
