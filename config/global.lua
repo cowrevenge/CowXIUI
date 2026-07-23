@@ -24,18 +24,21 @@ function M.DrawSettings()
         imgui.ShowHelp('On load, check GitHub and download any changed files, then reload the addon automatically. The game freezes briefly while it downloads.');
 
         -- Check Updates: reports status only, never writes anything.
-        local checkLabel = (updater.status == 'checking') and 'Checking...' or 'Check Updates';
-        if imgui.Button(checkLabel .. '##xiuiCheck', { 110, 0 }) then
+        --
+        -- Note there's no "Checking..." label: Check() blocks, and ImGui is
+        -- immediate mode, so the frame never presents while it runs. A
+        -- transient label would be unreachable and just imply the call is
+        -- async when it isn't. The game visibly hitches instead.
+        if imgui.Button('Check Updates##xiuiCheck', { 110, 0 }) then
             updater.Check();
         end
-        imgui.ShowHelp('Asks GitHub whether a newer version exists. Does not download or change anything.');
+        imgui.ShowHelp('Asks GitHub whether a newer version exists. Does not download or change anything. The game freezes for a moment while it asks.');
 
         -- Update Now is only offered once a check has actually found something,
         -- so the two buttons can't disagree about what's going on.
         if updater.updateReady then
             imgui.SameLine();
-            local updateLabel = (updater.status == 'updating') and 'Updating...' or 'Update Now';
-            if imgui.Button(updateLabel .. '##xiuiUpdate', { 110, 0 }) then
+            if imgui.Button('Update Now##xiuiUpdate', { 110, 0 }) then
                 updater.Update();
             end
             imgui.ShowHelp('Downloads the changed files and reloads the addon automatically. The game freezes briefly while it downloads.');

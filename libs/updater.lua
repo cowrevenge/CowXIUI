@@ -86,6 +86,22 @@ M.remoteVersion = nil;
 M.pending       = nil;
 M.lastError     = nil;
 
+-- Seed once so the cache-buster's random component isn't identical every
+-- session (LuaJIT's PRNG is otherwise deterministic from a fixed seed).
+math.randomseed(os.time());
+
+-- Clear all result state. Called at the start of every Check() so a repeat
+-- click always starts from a clean slate rather than showing a mix of old
+-- and new values.
+function M.Reset()
+    M.status        = 'idle';
+    M.message       = '';
+    M.updateReady   = false;
+    M.remoteVersion = nil;
+    M.pending       = nil;
+    M.lastError     = nil;
+end
+
 -- ============================================================
 -- Helpers
 -- ============================================================
@@ -116,6 +132,12 @@ local function isSkipped(path)
     return false;
 end
 
+-- Monotonically increasing counter for cache busting. os.time() alone has
+-- only one-second resolution, so two checks inside the same second produced
+-- an identical URL and could be served from cache -- which looked like the
+-- check "not resetting" because it returned the previous result.
+local requestCounter = 0;
+
 -- Blocking HTTPS GET. Returns body, or nil plus an error string.
 -- Cache-busted because raw.githubusercontent caches aggressively and would
 -- otherwise serve a stale file right after a push.
@@ -123,9 +145,14 @@ end
 -- Uses the simple https.request(url) -> body, code form, which is the same
 -- call the anglin addon uses successfully under Ashita v4.
 local function httpGet(url)
+    requestCounter = requestCounter + 1;
+
     local sep = url:find('%?') and '&' or '?';
+    local bust = string.format('t=%d_%d_%d',
+        os.time(), requestCounter, math.random(100000, 999999));
+
     local ok, body, code = pcall(function()
-        return https.request(url .. sep .. 't=' .. tostring(os.time()));
+        return https.request(url .. sep .. bust);
     end);
 
     if not ok then
@@ -216,10 +243,12 @@ end
 -- Compare the remote version to ours and work out which files differ.
 -- Blocking: 2 requests (XIUI.lua for the version, the tree API for the list).
 function M.Check()
-    M.status    = 'checking';
-    M.message   = 'Checking for updates...';
-    M.lastError = nil;
-    M.pending   = nil;
+    -- Full reset first: a repeat click must not inherit updateReady, pending
+    -- or the message from the previous run.
+    M.Reset();
+
+    M.status  = 'checking';
+    M.message = 'Checking for updates...';
 
     local localVersion = addon.version;
 
