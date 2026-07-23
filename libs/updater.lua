@@ -73,8 +73,16 @@ local SKIP_PREFIX = T{
 -- Files that must never be overwritten once they exist on disk -- things a
 -- user may customize. Still BACK-FILLED if missing entirely (fresh install),
 -- but never replaced once present. (Borrowed from anglin's onlyIfMissing.)
+--
+-- NOTE: core/settings/myconfig.lua is deliberately NOT listed here. It's the
+-- curated default config shipped to users, not per-user state, so it should
+-- update like any other tracked file. Live user settings live outside the
+-- addon folder and are never in the manifest to begin with.
 local ONLY_IF_MISSING = T{
-    -- e.g. ['assets/sounds/custom.wav'] = true,
+    -- Module runtime state. Not currently tracked (INCLUDE_EXT is .lua only),
+    -- but listed so they stay protected if that filter is ever widened.
+    ['modules/bovinelatent/current_trial.json'] = true,
+    ['modules/bovinededication/dedication_state.json'] = true,
 };
 
 -- ============================================================
@@ -177,6 +185,18 @@ local function fileSize(path)
     return size;
 end
 
+-- Byte length after normalizing CRLF to LF, matching what git recorded as the
+-- blob size. Used only as a fallback when the API omits a sha; a raw byte
+-- count would disagree on any Windows checkout (see libs/sha1.lua).
+local function normalizedSize(path)
+    local f = io.open(path, 'rb');
+    if not f then return nil; end
+    local data = f:read('*all');
+    f:close();
+    if data == nil then return nil; end
+    return #(data:gsub('\r\n', '\n'));
+end
+
 -- Pull { path, size } out of the git/trees JSON response.
 --
 -- Entries look like:
@@ -259,6 +279,7 @@ function M.Check()
 
     local pending = {};
     local matched = 0;
+    local protected = 0;
     for _, entry in ipairs(files) do
         if hasIncludedExt(entry.path) and not isSkipped(entry.path) then
             local localPath = toLocalPath(entry.path);
@@ -278,13 +299,16 @@ function M.Check()
                     else
                         matched = matched + 1;
                     end
-                elseif fileSize(localPath) ~= entry.size then
+                elseif normalizedSize(localPath) ~= entry.size then
                     table.insert(pending, entry);
                 else
                     matched = matched + 1;
                 end
             else
-                matched = matched + 1;
+                -- Protected file that already exists. It might well differ
+                -- from the repo, but we're deliberately not touching it, so
+                -- count it separately rather than claiming it matched.
+                protected = protected + 1;
             end
         end
     end
@@ -292,7 +316,8 @@ function M.Check()
     M.pending = pending;
     M.status  = 'done';
 
-    local total = matched + #pending;
+    local total = matched + protected + #pending;
+    local okCount = matched + protected;
 
     -- Keep a plain list of the differing paths so the config panel (and
     -- /xiui update list) can show exactly WHICH files are out of sync.
@@ -307,13 +332,13 @@ function M.Check()
     if #pending == 0 then
         M.updateReady = false;
         M.message     = string.format('All files checked! %d/%d, No updates',
-            matched, total);
+            okCount, total);
         return false;
     end
 
     M.updateReady = true;
     M.message     = string.format('All files checked! %d/%d, %d need updating',
-        matched, total, #pending);
+        okCount, total, #pending);
     return true;
 end
 

@@ -109,6 +109,18 @@ function M.blobFromString(data)
 end
 
 -- Git blob SHA of a file on disk, or nil if it can't be read.
+--
+-- IMPORTANT: line endings are normalized to LF first.
+--
+-- Git stores blobs with LF, but Git for Windows defaults to
+-- core.autocrlf=true, which converts to CRLF on checkout. So a file that is
+-- byte-identical to the repo as far as git is concerned sits on disk with
+-- CRLF and hashes differently. Without this normalization the updater
+-- reports untouched files as "needs updating", tries to download them, and
+-- they immediately come back as changed again -- a permanent false positive.
+--
+-- Hashing the LF-normalized bytes reproduces exactly what git hashed, so the
+-- comparison matches regardless of the user's autocrlf setting.
 function M.blobFromFile(path)
     local f = io.open(path, 'rb');
     if not f then
@@ -119,6 +131,7 @@ function M.blobFromFile(path)
     if data == nil then
         return nil;
     end
+    data = data:gsub('\r\n', '\n');
     return M.blobFromString(data);
 end
 
