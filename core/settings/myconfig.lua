@@ -15,17 +15,22 @@ function M.createConfigOverrides()
             ["showRecast"] = true,
         },
         ["colorCustomization"] = T{
+            -- hpTextColor stays black: HP text sits over the light HP bar fill,
+            -- where black reads well. tpEmptyTextColor was ALSO black, but the
+            -- sub-1000 TP bar is nearly empty and very dark, so "0" was drawn
+            -- black-on-black and looked like a blank box. White instead.
+            -- (-16777216 == 0xFF000000, -1 == 0xFFFFFFFF)
             ["partyListA"] = T{
                 ["hpTextColor"] = -16777216,
-                ["tpEmptyTextColor"] = -16777216,
+                ["tpEmptyTextColor"] = -1,
             },
             ["partyListB"] = T{
                 ["hpTextColor"] = -16777216,
-                ["tpEmptyTextColor"] = -16777216,
+                ["tpEmptyTextColor"] = -1,
             },
             ["partyListC"] = T{
                 ["hpTextColor"] = -16777216,
-                ["tpEmptyTextColor"] = -16777216,
+                ["tpEmptyTextColor"] = -1,
             },
         },
         ["enablePartyListClickTarget"] = true,

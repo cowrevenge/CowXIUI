@@ -351,6 +351,26 @@ function M.MigrateColorSettings(gConfig, defaults)
         gConfig.colorCustomization.partyListC = deep_copy_table(defaults.colorCustomization.partyListC);
     end
 
+    -- Fix black TP text.
+    --
+    -- An earlier shipped myconfig.lua set tpEmptyTextColor to 0xFF000000 for
+    -- all three party lists. HP text is also black there, which is fine
+    -- because it sits over the light HP bar fill -- but the sub-1000 TP bar is
+    -- nearly empty and very dark, so "0" was drawn black-on-black and looked
+    -- like a blank box. Anyone who ran that build has it saved in their own
+    -- settings, where a myconfig.lua change alone won't reach it.
+    --
+    -- Only the exact black value is replaced, so a deliberately chosen custom
+    -- color is left alone.
+    local BLACK_ARGB = -16777216;  -- 0xFF000000
+    local WHITE_ARGB = -1;         -- 0xFFFFFFFF
+    for _, key in ipairs({ 'partyListA', 'partyListB', 'partyListC' }) do
+        local pc = gConfig.colorCustomization[key];
+        if pc ~= nil and pc.tpEmptyTextColor == BLACK_ARGB then
+            pc.tpEmptyTextColor = WHITE_ARGB;
+        end
+    end
+
     -- Migrate old unified expBar barGradient to separate expBarGradient and meritBarGradient
     if gConfig.colorCustomization.expBar then
         if gConfig.colorCustomization.expBar.barGradient and not gConfig.colorCustomization.expBar.expBarGradient then

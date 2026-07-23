@@ -81,14 +81,27 @@ local function DrawPartyTabContent(party, partyName)
     if components.CollapsingSection('Display Options##party' .. partyName) then
         components.DrawPartyCheckbox(party, 'Show TP', 'showTP');
         if party.showTP then
-            components.DrawPartyCheckbox(party, 'Flash TP at 100%', 'flashTP');
-            if party.layout == 1 or party.layout == 2 then
-                imgui.ShowHelp('In compact / super compact, the TP text will flash when at 1000+ TP.');
-            end
-            components.DrawPartyCheckbox(party, 'Rainbow TP at 100%', 'rainbowTP');
-            if party.layout == 1 or party.layout == 2 then
-                imgui.ShowHelp('In compact / super compact, the TP text cycles through rainbow colors at 1000+ TP. Overrides Flash if both are on.');
-            end
+            -- Flash and Rainbow are alternative treatments of the same 1000+ TP
+            -- state, so they're mutually exclusive: turning one on clears the
+            -- other. Previously both could be checked at once, which just meant
+            -- Rainbow silently won and the Flash checkbox lied about what was
+            -- happening.
+            components.DrawPartyCheckbox(party, 'Flash TP at 100%', 'flashTP', function()
+                if party.flashTP then
+                    party.rainbowTP = false;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end
+            end);
+            imgui.ShowHelp('At 1000+ TP the TP text and bar overlay pulse in the flash color. Turning this on turns Rainbow off.');
+            components.DrawPartyCheckbox(party, 'Rainbow TP at 100%', 'rainbowTP', function()
+                if party.rainbowTP then
+                    party.flashTP = false;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end
+            end);
+            imgui.ShowHelp('At 1000+ TP the TP text and bar overlay cycle through rainbow hues. Turning this on turns Flash off.');
         end
         components.DrawPartyCheckbox(party, 'Target HP Color', 'targetHpColor');
         imgui.ShowHelp('Color the Target window HP% text by HP threshold (100/50/33/25/0). Off = white.');

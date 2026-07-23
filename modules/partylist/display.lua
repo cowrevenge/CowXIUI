@@ -1542,13 +1542,35 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
     -- Position HP text
     local hpBaselineOffset = hpRefHeight - hpHeight;
     local nameBaselineOffset = nameRefHeight - nameHeight;
+
+    -- Layout 0 (Horizontal) draws all of its text through imgui, the same way
+    -- layout 1 and the player/target bars do. gdifont primitives render UNDER
+    -- imgui, so anything left on the gdi layer is covered by the window
+    -- background. Positions are collected here and drawn at the end of
+    -- DrawMember, after every bar and background, via drawOutlinedText.
+    --
+    -- NOTE: imgui positions text by its top-left corner and has no baseline
+    -- correction, so these use imgui.CalcTextSize rather than the gdifont
+    -- *RefHeight / *BaselineOffset values used by the old primitive path.
+    local pendingL0 = (layout == 0) and {} or nil;
+
     if layout == 1 then
         -- Layout 1: overlay HP text on HP bar, right-aligned and vertically centered.
         data.memberText[memIdx].hp:set_position_x(hpDrawX + hpBarWidth - hpTextWidth - 4 + textOffsets.hpX);
         data.memberText[memIdx].hp:set_position_y(hpStartY + (hpBarHeight - hpHeight) / 2 + textOffsets.hpY);
     else
-        data.memberText[memIdx].hp:set_position_x(hpStartX + hpBarWidth + settings.hpTextOffsetX + textOffsets.hpX);
-        data.memberText[memIdx].hp:set_position_y(hpStartY + hpBarHeight + settings.hpTextOffsetY + hpBaselineOffset + textOffsets.hpY);
+        -- Layout 0: HP value sits below the HP bar, left-aligned at the bar's
+        -- right edge offset. Queued for the imgui pass at the end.
+        -- Layout 0: HP value sits below the HP bar. The gdifont primitive used
+        -- Right alignment (see hp_font_settings), meaning the X it was given
+        -- was the RIGHT edge of the text. imgui draws from the left, so the
+        -- text width has to be subtracted to land in the same place.
+        local imguiHpW = imgui.CalcTextSize(tostring(hpDisplayText or ''));
+        pendingL0.hp = {
+            x = hpStartX + hpBarWidth + settings.hpTextOffsetX + textOffsets.hpX - imguiHpW,
+            y = hpStartY + hpBarHeight + settings.hpTextOffsetY + textOffsets.hpY,
+            text = hpDisplayText,
+        };
     end
 
     -- Draw leader icon (yellow). Layout 1 (compact): retail-style — enlarged,
@@ -1753,16 +1775,23 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     color = highlightDistance and {0, 1, 1, 1} or {1, 1, 1, 1},
                 };
             else
-                setCachedText(memIdx, 'distance', data.memberText[memIdx].distance, distanceText);
-                data.memberText[memIdx].distance:set_position_x(distancePosX + textOffsets.distanceX);
-                data.memberText[memIdx].distance:set_position_y(distancePosY);
+                -- Layout 0: distance sits on the name row, right-aligned to the
+                -- HP bar's right edge. Drawn via imgui like the rest of this
+                -- layout's text so the window background can't cover it.
+                local imguiDistW, imguiDistH = imgui.CalcTextSize(tostring(distanceText or ''));
+                pendingL0.distance = {
+                    x = distancePosX + textOffsets.distanceX - imguiDistW,
+                    y = hpStartY - imguiDistH + textOffsets.distanceY,
+                    text = distanceText,
+                    color = highlightDistance and {0, 1, 1, 1} or nil,
+                };
                 showDistance = true;
             end
         end
     end
 
     -- Layout 1 hides the gdifont distance primitive (drawn manually at end via drawOutlinedText).
-    data.memberText[memIdx].distance:set_visible(showDistance and layout ~= 1);
+    data.memberText[memIdx].distance:set_visible(false);
     if showDistance then
         local desiredDistanceColor = highlightDistance and 0xFF00FFFF or cache.colors.nameTextColor;
         if (data.memberTextColorCache[memIdx].distance ~= desiredDistanceColor) then
@@ -1792,19 +1821,21 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         if jobStr ~= '' then
             setCachedText(memIdx, 'job', data.memberText[memIdx].job, jobStr);
             data.memberText[memIdx].job:set_font_height(fontSizes.job);
-            local jobTextWidth, jobTextHeight = data.memberText[memIdx].job:get_text_size();
-            local jobPosX = hpStartX + allBarsLengths - jobTextWidth;
-            data.memberText[memIdx].job:set_position_x(jobPosX + textOffsets.jobX);
-            data.memberText[memIdx].job:set_position_y(hpStartY - nameRefHeight - settings.nameTextOffsetY + nameBaselineOffset + textOffsets.jobY);
-            local desiredJobColor = cache.colors.nameTextColor;
-            if (data.memberTextColorCache[memIdx].job ~= desiredJobColor) then
-                data.memberText[memIdx].job:set_font_color(desiredJobColor);
-                data.memberTextColorCache[memIdx].job = desiredJobColor;
-            end
+            -- Layout 0: job text sits on the name row, right-aligned to the far
+            -- edge of the bars. Measured and drawn with imgui (job text is only
+            -- shown in layout 0 -- see the showJob check above).
+            local imguiJobW, imguiJobH = imgui.CalcTextSize(tostring(jobStr or ''));
+            local jobPosX = hpStartX + allBarsLengths - imguiJobW;
+            pendingL0.job = {
+                x = jobPosX + textOffsets.jobX,
+                y = hpStartY - imguiJobH - settings.nameTextOffsetY + textOffsets.jobY,
+                text = jobStr,
+                color = cache.colors.nameTextColor,
+            };
             showJobText = true;
         end
     end
-    data.memberText[memIdx].job:set_visible(showJobText);
+    data.memberText[memIdx].job:set_visible(false);
 
     -- Layout 1: draw distance (e.g. "18.3") on the name's line, right-aligned,
     -- BEFORE the MP/TP/cast bars so that when the member is casting the cast bar
@@ -2089,11 +2120,27 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     end
                 end
 
-                -- Recalculate mp text width in case it changed to spell name
-                local currentMpTextWidth, _ = data.memberText[memIdx].mp:get_text_size();
-                local mpBaselineOffset = mpRefHeight - mpHeight;
-                data.memberText[memIdx].mp:set_position_x(mpStartX + mpBarWidth - currentMpTextWidth + textOffsets.mpX);
-                data.memberText[memIdx].mp:set_position_y(mpStartY + mpBarHeight + settings.mpTextOffsetY + mpBaselineOffset + textOffsets.mpY);
+                -- Layout 0: MP value sits below the MP bar, right-aligned to the
+                -- bar's right edge. mp_font_settings is Left-aligned, so the
+                -- original code right-aligned it manually by subtracting the
+                -- text width -- reproduced here with the imgui width so it
+                -- matches the text actually drawn.
+                --
+                -- The text may be the MP value or a spell name (cast style
+                -- 'mp'), so prefer whatever setCachedText last wrote. But that
+                -- only writes when the value CHANGES, so fall back to
+                -- mpDisplayText rather than drawing nothing if the cache is
+                -- empty. Forced to a string: the cache can hold a number and
+                -- imgui applies string methods to its argument.
+                local mpCached = (data.memberTextCache[memIdx] or {}).mp;
+                local mpDrawText = tostring(mpCached or mpDisplayText or '');
+                local imguiMpW = imgui.CalcTextSize(mpDrawText);
+                pendingL0.mp = {
+                    x = mpStartX + mpBarWidth - imguiMpW + textOffsets.mpX,
+                    y = mpStartY + mpBarHeight + settings.mpTextOffsetY + textOffsets.mpY,
+                    text = mpDrawText,
+                    color = cache.colors.mpTextColor,
+                };
             end
 
             -- TP bar (or cast bar if castBarStyle == 'tp')
@@ -2122,10 +2169,19 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
 
                     if (memInfo.tp >= 1000) then
                         mainPercent = (memInfo.tp - 1000) / 2000;
-                        if (cache.flashTP) then
-                            local flashARGB = cache.colors.tpFlashColor or 0xFF3ECE00;
-                            local flashHex = string.format('#%06X', bit.band(flashARGB, 0xFFFFFF));
-                            tpOverlay = {{1, tpOverlayGradient}, math.ceil(tpBarHeight * 5/7), 0, { flashHex, 1 }};
+                        -- Rainbow and Flash both tint the 1000+ overlay. Rainbow
+                        -- takes precedence (same rule as the TP text), and its
+                        -- current hue comes from the shared helper so bar and
+                        -- text stay in sync through the cycle.
+                        if (cache.rainbowTP or cache.flashTP) then
+                            local overlayARGB;
+                            if cache.rainbowTP then
+                                overlayARGB = computeTpColorARGB(memInfo, cache);
+                            else
+                                overlayARGB = cache.colors.tpFlashColor or 0xFF3ECE00;
+                            end
+                            local overlayHex = string.format('#%06X', bit.band(overlayARGB, 0xFFFFFF));
+                            tpOverlay = {{1, tpOverlayGradient}, math.ceil(tpBarHeight * 5/7), 0, { overlayHex, 1 }};
                         else
                             tpOverlay = {{1, tpOverlayGradient}, math.ceil(tpBarHeight * 2/7), 1};
                         end
@@ -2135,7 +2191,11 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
 
                     progressbar.ProgressBar({{mainPercent, tpGradient}}, {tpBarWidth, tpBarHeight}, {overlayBar=tpOverlay, decorate = cache.showBookends, backgroundGradientOverride = data.getBarBackgroundOverride(partyIndex), borderColorOverride = data.getBarBorderOverride(partyIndex)});
 
-                    local desiredTpColor = (memInfo.tp >= 1000) and cache.colors.tpFullTextColor or cache.colors.tpEmptyTextColor;
+                    -- Use the shared helper so Horizontal honors rainbowTP and
+                    -- flashTP exactly like Compact / Super Compact do. It also
+                    -- applies the rainbow-over-flash precedence, instead of the
+                    -- old flat full/empty pick that ignored both settings.
+                    local desiredTpColor = computeTpColorARGB(memInfo, cache);
                     if (data.memberTextColorCache[memIdx].tp ~= desiredTpColor) then
                         data.memberText[memIdx].tp:set_font_color(desiredTpColor);
                         data.memberTextColorCache[memIdx].tp = desiredTpColor;
@@ -2143,11 +2203,21 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     setCachedText(memIdx, 'tp', data.memberText[memIdx].tp, tpText);
                 end
 
-                -- Recalculate tp text width in case it changed to spell name
-                local currentTpTextWidth, _ = data.memberText[memIdx].tp:get_text_size();
-                local tpBaselineOffset = tpRefHeight - tpHeight;
-                data.memberText[memIdx].tp:set_position_x(tpStartX + tpBarWidth - currentTpTextWidth + textOffsets.tpX);
-                data.memberText[memIdx].tp:set_position_y(tpStartY + tpBarHeight + settings.tpTextOffsetY + tpBaselineOffset + textOffsets.tpY);
+                -- Layout 0: TP value sits below the TP bar, right-aligned to the
+                -- bar's right edge (the original manually right-aligned it by
+                -- subtracting the text width, so do the same with the imgui
+                -- width). Read tpText directly rather than via the text cache:
+                -- setCachedText only writes when the value CHANGES, so the
+                -- cache can legitimately be empty on the first frame and the
+                -- number would silently not draw.
+                local tpDrawText = tostring(tpText or '');
+                local imguiTpW = imgui.CalcTextSize(tpDrawText);
+                pendingL0.tp = {
+                    x = tpStartX + tpBarWidth - imguiTpW + textOffsets.tpX,
+                    y = tpStartY + tpBarHeight + settings.tpTextOffsetY + textOffsets.tpY,
+                    text = tpDrawText,
+                    color = computeTpColorARGB(memInfo, cache),
+                };
             end
         end
 
@@ -2332,9 +2402,13 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
     -- HP/MP/TP gdifont primitives are not used in layout 1 (Compact Vertical) — text is
     -- drawn directly into the imgui draw list via drawOutlinedText so it appears on top
     -- of the bars. Layout 0 continues to use the gdifont primitives.
-    data.memberText[memIdx].hp:set_visible(memInfo.inzone and layout ~= 1);
-    data.memberText[memIdx].mp:set_visible(memInfo.inzone and showMpBar and layout ~= 1);
-    data.memberText[memIdx].tp:set_visible(memInfo.inzone and showTP and layout ~= 1);
+    -- Every layout now draws its text through imgui (gdifont primitives render
+    -- UNDER imgui, so anything left on that layer is covered by the window
+    -- background). The primitives are kept around for text measurement and
+    -- caching, but are never shown.
+    data.memberText[memIdx].hp:set_visible(false);
+    data.memberText[memIdx].mp:set_visible(false);
+    data.memberText[memIdx].tp:set_visible(false);
 
     -- Reserve space for layout
     if layout == 1 and memInfo.inzone then
@@ -2418,10 +2492,46 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             nameX = hpStartX + 2 + textOffsets.nameX;
             nameY = hpStartY - nameHeight / 2 + textOffsets.nameY;
         else
+            -- Layout 0: name sits on its own row directly above the HP bar.
+            -- Measured with imgui, not the gdifont nameRefHeight/baseline pair
+            -- the primitive path used -- imgui positions from the top-left with
+            -- no baseline correction, so mixing the two metrics pushed the text
+            -- out of the row entirely.
+            local _, imguiNameH = imgui.CalcTextSize(tostring(nameToDraw or ''));
             nameX = namePosX + textOffsets.nameX;
-            nameY = hpStartY - nameRefHeight - settings.nameTextOffsetY + nameBaselineOffset + textOffsets.nameY;
+            nameY = hpStartY - imguiNameH - settings.nameTextOffsetY + textOffsets.nameY;
         end
         drawOutlinedText(nameX, nameY, nameToDraw, nameColor);
+    end
+
+    -- Layout 0 (Horizontal): draw the queued HP / MP / TP / job / distance text.
+    -- Done here, at the very end of DrawMember, so it lands on top of the window
+    -- background and every bar -- the same approach layout 1 and the player bar
+    -- use. Colors are ARGB ints from the config, converted for imgui.
+    if pendingL0 ~= nil then
+        local function drawPending(p, defaultColor)
+            if p == nil or p.text == nil then return; end
+            -- Values coming out of the text cache can be numbers; everything
+            -- downstream (CalcTextSize, AddText) expects a string.
+            local txt = tostring(p.text);
+            if txt == '' then return; end
+            local col = defaultColor;
+            if p.color ~= nil then
+                if type(p.color) == 'table' then
+                    col = p.color;
+                elseif type(p.color) == 'number' then
+                    col = ARGBToImGui(p.color);
+                end
+            end
+            drawOutlinedText(p.x, p.y, txt, col);
+        end
+
+        local white = {1, 1, 1, 1};
+        drawPending(pendingL0.hp, white);
+        drawPending(pendingL0.mp, white);
+        drawPending(pendingL0.tp, white);
+        drawPending(pendingL0.job, white);
+        drawPending(pendingL0.distance, white);
     end
 
 end

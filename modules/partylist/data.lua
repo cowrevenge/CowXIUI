@@ -417,8 +417,12 @@ function data.updatePartyConfigCache()
         cache.castBarStyle = party.castBarStyle or 'name';
         cache.showBookends = party.showBookends;
         cache.showTitle = party.showTitle;
-        cache.flashTP = party.flashTP;
+        -- Flash and Rainbow are mutually exclusive. The config UI enforces that
+        -- going forward, but a profile saved before that could have both set,
+        -- so resolve it here too: Rainbow wins, matching the precedence in
+        -- computeTpColorARGB.
         cache.rainbowTP = party.rainbowTP;
+        cache.flashTP = party.flashTP and not party.rainbowTP;
         cache.targetHpColor = party.targetHpColor;
         cache.backgroundName = party.backgroundName;
         cache.bgScale = party.bgScale or 1;
