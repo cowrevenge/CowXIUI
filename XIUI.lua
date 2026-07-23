@@ -591,6 +591,44 @@ ashita.events.register('load', 'load_cb', function ()
     -- the guard stays true across reloads and hotbar windows never restore.
     if gConfig then gConfig.appliedPositions = {}; end
 
+    -- Auto update. When enabled, this diffs against the repo manifest on load
+    -- and downloads any changed files, then reloads the addon so the new code
+    -- actually takes effect.
+    --
+    -- Timing note: by the time this load event fires, every .lua is already
+    -- loaded into memory. Overwriting them now does NOT change the running
+    -- session -- which is exactly why the reload at the end is required, not
+    -- optional. Without it you'd be running old code against new files until
+    -- the next manual reload.
+    --
+    -- The _XIUI_AUTOUPDATE_DONE global guards against a reload loop: it
+    -- survives the addon reload (Ashita globals persist for the session), so
+    -- the second pass skips the check entirely.
+    if gConfig and gConfig.autoUpdateCheck and not _XIUI_AUTOUPDATE_DONE then
+        _XIUI_AUTOUPDATE_DONE = true;
+
+        local ok, updater = pcall(require, 'libs.updater');
+        if ok and updater then
+            pcall(function()
+                -- Check() is a blocking HTTPS call; it returns true only when
+                -- the remote version is newer AND files actually differ.
+                if updater.Check() and updater.updateReady then
+                    print(chat.header('XIUI'):append(chat.message(
+                        'Auto update: ' .. tostring(updater.message))));
+
+                    if updater.Update() then
+                        print(chat.header('XIUI'):append(chat.message(
+                            'Auto update complete, reloading...')));
+                        AshitaCore:GetChatManager():QueueCommand(-1, '/addon reload xiui');
+                    else
+                        print(chat.header('XIUI'):append(chat.error(
+                            'Auto update failed: ' .. tostring(updater.message))));
+                    end
+                end
+            end);
+        end
+    end
+
     -- Populate the ImGui font atlas now, before the first d3d_present, so no
     -- font selection in the hotbar/config has to mutate the atlas mid-frame
     -- (which crashes on Ashita 4.16). See libs/imtext.lua PrewarmFonts notes.

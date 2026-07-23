@@ -38,6 +38,7 @@ function M.createUserSettingsDefaults()
         showBovinecombat = true,
         bovinecombatHidden = false,
         bovinecombatShowRestTick = true,
+        autoUpdateCheck = false,  -- on load: diff against repo, download changes, reload
 
         -- Treasure Pool settings
         treasurePoolEnabled = true,           -- Show treasure pool when items in pool
