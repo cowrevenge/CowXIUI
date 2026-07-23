@@ -616,11 +616,9 @@ ashita.events.register('load', 'load_cb', function ()
                     print(chat.header('XIUI'):append(chat.message(
                         'Auto update: ' .. tostring(updater.message))));
 
-                    if updater.Update() then
-                        print(chat.header('XIUI'):append(chat.message(
-                            'Auto update complete, reloading...')));
-                        AshitaCore:GetChatManager():QueueCommand(-1, '/addon reload xiui');
-                    else
+                    -- Update() reloads the addon itself on success, so there's
+                    -- nothing to queue here.
+                    if not updater.Update() then
                         print(chat.header('XIUI'):append(chat.error(
                             'Auto update failed: ' .. tostring(updater.message))));
                     end

@@ -26,8 +26,9 @@
 *    the new file renamed into place. If anything fails the original is
 *    restored, so a broken download can never leave a truncated .lua behind.
 *  - Overwriting files does not affect the running session (Lua is already
-*    loaded), so the caller must reload afterwards. Auto update does this
-*    itself; the config button tells the user to.
+*    loaded in memory), so Update() queues an /addon reload xiui on success.
+*    Both the manual button and the auto-update path go through Update(), so
+*    they behave identically -- neither leaves you running stale code.
 ]]--
 
 require('common');
@@ -244,7 +245,7 @@ function M.Check()
     if not versionGreater(remote, localVersion) then
         M.status      = 'done';
         M.updateReady = false;
-        M.message     = string.format('Up to date (v%s).', tostring(localVersion));
+        M.message     = string.format('Up to date! (v%s)', tostring(localVersion));
         return false;
     end
 
@@ -253,8 +254,17 @@ function M.Check()
     if not treeBody then
         M.status      = 'error';
         M.updateReady = false;
-        M.message     = string.format('v%s available but could not list files (%s).',
-            remote, tostring(terr));
+        -- The tree API is rate limited to 60 requests/hour per IP (we use one
+        -- per check, but the limit is shared by everything on that IP). Call
+        -- that out specifically, since "HTTP 403" on its own looks like a
+        -- permissions problem rather than something that clears on its own.
+        if terr == 'HTTP 403' or terr == 'HTTP 429' then
+            M.message = string.format(
+                'v%s available, but GitHub is rate limiting right now. Try again later.', remote);
+        else
+            M.message = string.format('v%s available but could not list files (%s).',
+                remote, tostring(terr));
+        end
         return false;
     end
 
@@ -291,10 +301,20 @@ function M.Check()
         end
     end
 
-    M.pending     = pending;
+    M.pending = pending;
+    M.status  = 'done';
+
+    -- A version bump with nothing actually different: the files on disk are
+    -- already current, so there's nothing to download. Report it as up to date
+    -- rather than offering an Update button that would do nothing.
+    if #pending == 0 then
+        M.updateReady = false;
+        M.message     = string.format('Up to date! (files match v%s)', remote);
+        return false;
+    end
+
     M.updateReady = true;
-    M.status      = 'done';
-    M.message     = string.format('v%s available (%d file%s to update).',
+    M.message     = string.format('Needs updating! v%s (%d file%s)',
         remote, #pending, #pending == 1 and '' or 's');
     return true;
 end
@@ -375,8 +395,15 @@ function M.Update()
     M.pending     = nil;
     M.updateReady = false;
     M.status      = 'done';
-    M.message     = string.format('Updated %d file%s. Run: /addon reload xiui',
+    M.message     = string.format('Updated %d file%s, reloading...',
         done, done == 1 and '' or 's');
+
+    -- Reload ourselves. Overwriting the .lua files does nothing to the running
+    -- session -- Lua is already loaded in memory -- so without this you'd keep
+    -- running the old code against the new files until a manual reload. Queued
+    -- rather than called directly so the current frame finishes first.
+    AshitaCore:GetChatManager():QueueCommand(-1, '/addon reload xiui');
+
     return true;
 end
 

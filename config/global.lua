@@ -15,6 +15,44 @@ local M = {};
 -- Section: Global Settings (combines General, Font, and Bar settings)
 function M.DrawSettings()
     if components.CollapsingSection('General##global') then
+        -- Updates first: this is the thing people come looking for, and it was
+        -- easy to miss buried under the theme pickers.
+        --
+        -- Both buttons are BLOCKING network calls (LuaSocket), so they only
+        -- ever run on an explicit click, never on a timer or during render.
+        components.DrawCheckbox('Auto update', 'autoUpdateCheck');
+        imgui.ShowHelp('On load, check GitHub and download any changed files, then reload the addon automatically. The game freezes briefly while it downloads.');
+
+        -- Check Updates: reports status only, never writes anything.
+        local checkLabel = (updater.status == 'checking') and 'Checking...' or 'Check Updates';
+        if imgui.Button(checkLabel .. '##xiuiCheck', { 110, 0 }) then
+            updater.Check();
+        end
+        imgui.ShowHelp('Asks GitHub whether a newer version exists. Does not download or change anything.');
+
+        -- Update Now is only offered once a check has actually found something,
+        -- so the two buttons can't disagree about what's going on.
+        if updater.updateReady then
+            imgui.SameLine();
+            local updateLabel = (updater.status == 'updating') and 'Updating...' or 'Update Now';
+            if imgui.Button(updateLabel .. '##xiuiUpdate', { 110, 0 }) then
+                updater.Update();
+            end
+            imgui.ShowHelp('Downloads the changed files and reloads the addon automatically. The game freezes briefly while it downloads.');
+        end
+
+        if updater.message ~= nil and updater.message ~= '' then
+            if updater.status == 'error' then
+                imgui.TextColored({ 1.0, 0.45, 0.45, 1.0 }, updater.message);
+            elseif updater.updateReady then
+                imgui.TextColored({ 1.0, 0.85, 0.4, 1.0 }, updater.message);
+            else
+                imgui.TextColored({ 0.6, 0.9, 0.6, 1.0 }, updater.message);
+            end
+        end
+
+        imgui.Separator();
+
         components.DrawCheckbox('Lock HUD Position', 'lockPositions');
 
         -- Status Icon Theme
@@ -39,41 +77,6 @@ function M.DrawSettings()
         imgui.ShowHelp('Scales the size of the tooltip. Note that text may appear blured if scaled too large.');
 
         components.DrawCheckbox('Hide During Events', 'hideDuringEvents');
-
-        imgui.Separator();
-
-        -- Updates. Both actions are BLOCKING network calls (LuaSocket), so
-        -- they only ever run on an explicit click, never automatically on a
-        -- timer or during render.
-        components.DrawCheckbox('Auto update', 'autoUpdateCheck');
-        imgui.ShowHelp('On load, check GitHub and download any changed files, then reload the addon automatically. The game freezes briefly while it downloads.');
-
-        local updateLabel = 'Update now';
-        if updater.status == 'checking' then
-            updateLabel = 'Checking...';
-        elseif updater.status == 'updating' then
-            updateLabel = 'Updating...';
-        end
-
-        if imgui.Button(updateLabel .. '##xiuiUpdate', { 110, 0 }) then
-            -- Check first so we only download files that actually differ.
-            updater.Check();
-            if updater.updateReady then
-                updater.Update();
-            end
-        end
-        imgui.ShowHelp('Downloads changed files from GitHub. The game will briefly freeze while it downloads. You must /addon reload xiui afterwards.');
-
-        if updater.message ~= nil and updater.message ~= '' then
-            imgui.SameLine();
-            if updater.status == 'error' then
-                imgui.TextColored({ 1.0, 0.45, 0.45, 1.0 }, updater.message);
-            elseif updater.updateReady then
-                imgui.TextColored({ 1.0, 0.85, 0.4, 1.0 }, updater.message);
-            else
-                imgui.TextColored({ 0.6, 0.9, 0.6, 1.0 }, updater.message);
-            end
-        end
     end
 
     if components.CollapsingSection('Text Settings##global') then
