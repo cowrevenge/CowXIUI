@@ -85,6 +85,7 @@ M.status        = 'idle';   -- idle | checking | updating | done | error
 M.message       = '';
 M.updateReady   = false;
 M.pending       = nil;
+M.pendingPaths  = nil;
 M.lastError     = nil;
 
 -- Seed once so the cache-buster's random component isn't identical every
@@ -99,6 +100,7 @@ function M.Reset()
     M.message       = '';
     M.updateReady   = false;
     M.pending       = nil;
+    M.pendingPaths  = nil;
     M.lastError     = nil;
 end
 
@@ -291,6 +293,16 @@ function M.Check()
     M.status  = 'done';
 
     local total = matched + #pending;
+
+    -- Keep a plain list of the differing paths so the config panel (and
+    -- /xiui update list) can show exactly WHICH files are out of sync.
+    -- "6 need updating" on its own isn't actionable -- knowing it's the six
+    -- files you just hand-copied, versus six you've never touched, is the
+    -- difference between "expected" and "something is wrong".
+    M.pendingPaths = {};
+    for _, e in ipairs(pending) do
+        table.insert(M.pendingPaths, e.path);
+    end
 
     if #pending == 0 then
         M.updateReady = false;

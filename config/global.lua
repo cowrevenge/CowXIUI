@@ -59,6 +59,19 @@ function M.DrawSettings()
             end
         end
 
+        -- List the actual filenames when something is out of sync. A bare
+        -- count isn't actionable: seeing WHICH files differ tells you at a
+        -- glance whether it's the ones you just edited (expected) or files
+        -- you've never touched (worth investigating before overwriting).
+        if updater.pendingPaths ~= nil and #updater.pendingPaths > 0 then
+            if imgui.TreeNode('Show files##xiuiPendingList') then
+                for _, p in ipairs(updater.pendingPaths) do
+                    imgui.TextColored({ 0.75, 0.75, 0.8, 1.0 }, '  ' .. p);
+                end
+                imgui.TreePop();
+            end
+        end
+
         imgui.Separator();
 
         components.DrawCheckbox('Lock HUD Position', 'lockPositions');
