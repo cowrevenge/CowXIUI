@@ -5,6 +5,10 @@
 * there is no manifest file to regenerate and commit.
 *
 * How it decides what to download:
+*  - Purely by comparing file contents. There is no version check: gating on
+*    addon.version assumes every push bumps it, and this repo gets fixes
+*    pushed constantly while the version moves rarely -- so a version gate
+*    would report "up to date" while the files on disk were genuinely behind.
 *  - GitHub's git/trees API returns EVERY file in the repo with its size and
 *    blob SHA in a single request. That is effectively a manifest GitHub keeps
 *    up to date for us automatically, so a push is all that's needed -- no
@@ -53,8 +57,6 @@ local TREE_URL = string.format(
     'https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1',
     REPO_OWNER, REPO_NAME, REPO_BRANCH);
 
-local VERSION_URL = RAW_BASE .. 'XIUI.lua';
-
 -- Only these extensions are ever updated. Assets are deliberately excluded:
 -- this repo carries several thousand PNGs, and syncing those would mean
 -- thousands of blocking requests. Art changes rarely; re-clone for that.
@@ -82,7 +84,6 @@ local ONLY_IF_MISSING = T{
 M.status        = 'idle';   -- idle | checking | updating | done | error
 M.message       = '';
 M.updateReady   = false;
-M.remoteVersion = nil;
 M.pending       = nil;
 M.lastError     = nil;
 
@@ -97,7 +98,6 @@ function M.Reset()
     M.status        = 'idle';
     M.message       = '';
     M.updateReady   = false;
-    M.remoteVersion = nil;
     M.pending       = nil;
     M.lastError     = nil;
 end
@@ -175,33 +175,6 @@ local function fileSize(path)
     return size;
 end
 
-local function parseVersion(body)
-    local v = body:match("addon%.version%s*=%s*'([^']+)'");
-    if not v then
-        v = body:match('addon%.version%s*=%s*"([^"]+)"');
-    end
-    return v;
-end
-
-local function parseVerParts(v)
-    local parts = {};
-    for n in tostring(v or ''):gmatch('%d+') do
-        table.insert(parts, tonumber(n));
-    end
-    return parts;
-end
-
--- true when a > b, compared numerically per component so 1.10 > 1.9.
-local function versionGreater(a, b)
-    local pa, pb = parseVerParts(a), parseVerParts(b);
-    for i = 1, math.max(#pa, #pb) do
-        local ai, bi = pa[i] or 0, pb[i] or 0;
-        if ai > bi then return true; end
-        if ai < bi then return false; end
-    end
-    return false;
-end
-
 -- Pull { path, size } out of the git/trees JSON response.
 --
 -- Entries look like:
@@ -250,35 +223,14 @@ function M.Check()
     M.status  = 'checking';
     M.message = 'Checking for updates...';
 
-    local localVersion = addon.version;
-
-    local head, err = httpGet(VERSION_URL);
-    if not head then
-        M.status      = 'error';
-        M.lastError   = err;
-        M.updateReady = false;
-        M.message     = 'Could not reach GitHub: ' .. tostring(err);
-        return false;
-    end
-
-    local remote = parseVersion(head);
-    if not remote then
-        M.status      = 'error';
-        M.updateReady = false;
-        M.message     = 'Could not read remote version.';
-        return false;
-    end
-
-    M.remoteVersion = remote;
-
-    if not versionGreater(remote, localVersion) then
-        M.status      = 'done';
-        M.updateReady = false;
-        M.message     = string.format('Up to date! (v%s)', tostring(localVersion));
-        return false;
-    end
-
-    -- Newer version exists. Ask GitHub for the file list to see what changed.
+    -- Straight to the file comparison. There's no version pre-fetch: the
+    -- version doesn't gate anything, so downloading a 56KB XIUI.lua just to
+    -- read one line was a wasted request -- and a failure point, since a
+    -- hiccup there would abort the check before the comparison that actually
+    -- matters ever ran.
+    --
+    -- The repo's addon.version is picked up from the tree data below if we
+    -- happen to be downloading XIUI.lua anyway, purely for display.
     local treeBody, terr = httpGet(TREE_URL);
     if not treeBody then
         M.status      = 'error';
@@ -288,11 +240,9 @@ function M.Check()
         -- that out specifically, since "HTTP 403" on its own looks like a
         -- permissions problem rather than something that clears on its own.
         if terr == 'HTTP 403' or terr == 'HTTP 429' then
-            M.message = string.format(
-                'v%s available, but GitHub is rate limiting right now. Try again later.', remote);
+            M.message = 'GitHub is rate limiting right now. Try again in a few minutes.';
         else
-            M.message = string.format('v%s available but could not list files (%s).',
-                remote, tostring(terr));
+            M.message = string.format('Could not list repo files (%s).', tostring(terr));
         end
         return false;
     end
@@ -306,6 +256,7 @@ function M.Check()
     end
 
     local pending = {};
+    local matched = 0;
     for _, entry in ipairs(files) do
         if hasIncludedExt(entry.path) and not isSkipped(entry.path) then
             local localPath = toLocalPath(entry.path);
@@ -322,10 +273,16 @@ function M.Check()
                 if entry.sha ~= nil then
                     if localSha ~= entry.sha then
                         table.insert(pending, entry);
+                    else
+                        matched = matched + 1;
                     end
                 elseif fileSize(localPath) ~= entry.size then
                     table.insert(pending, entry);
+                else
+                    matched = matched + 1;
                 end
+            else
+                matched = matched + 1;
             end
         end
     end
@@ -333,18 +290,18 @@ function M.Check()
     M.pending = pending;
     M.status  = 'done';
 
-    -- A version bump with nothing actually different: the files on disk are
-    -- already current, so there's nothing to download. Report it as up to date
-    -- rather than offering an Update button that would do nothing.
+    local total = matched + #pending;
+
     if #pending == 0 then
         M.updateReady = false;
-        M.message     = string.format('Up to date! (files match v%s)', remote);
+        M.message     = string.format('All files checked! %d/%d, No updates',
+            matched, total);
         return false;
     end
 
     M.updateReady = true;
-    M.message     = string.format('Needs updating! v%s (%d file%s)',
-        remote, #pending, #pending == 1 and '' or 's');
+    M.message     = string.format('All files checked! %d/%d, %d need updating',
+        matched, total, #pending);
     return true;
 end
 

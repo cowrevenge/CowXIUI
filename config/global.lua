@@ -34,14 +34,19 @@ function M.DrawSettings()
         end
         imgui.ShowHelp('Asks GitHub whether a newer version exists. Does not download or change anything. The game freezes for a moment while it asks.');
 
-        -- Update Now is only offered once a check has actually found something,
-        -- so the two buttons can't disagree about what's going on.
+        -- Update Now is always drawn so the pair is visibly a pair, but it's
+        -- disabled until a check has actually found something to download.
+        imgui.SameLine();
         if updater.updateReady then
-            imgui.SameLine();
             if imgui.Button('Update Now##xiuiUpdate', { 110, 0 }) then
                 updater.Update();
             end
             imgui.ShowHelp('Downloads the changed files and reloads the addon automatically. The game freezes briefly while it downloads.');
+        else
+            imgui.PushStyleVar(ImGuiStyleVar_Alpha, 0.4);
+            imgui.Button('Update Now##xiuiUpdateOff', { 110, 0 });
+            imgui.PopStyleVar();
+            imgui.ShowHelp('Nothing to download. Run Check Updates first.');
         end
 
         if updater.message ~= nil and updater.message ~= '' then

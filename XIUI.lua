@@ -610,8 +610,10 @@ ashita.events.register('load', 'load_cb', function ()
         local ok, updater = pcall(require, 'libs.updater');
         if ok and updater then
             pcall(function()
-                -- Check() is a blocking HTTPS call; it returns true only when
-                -- the remote version is newer AND files actually differ.
+                -- Check() is a blocking HTTPS call; it returns true when any
+                -- tracked file on disk differs from the repo. It no longer
+                -- requires a version bump, so pushes that don't move
+                -- addon.version still get picked up.
                 if updater.Check() and updater.updateReady then
                     print(chat.header('XIUI'):append(chat.message(
                         'Auto update: ' .. tostring(updater.message))));
