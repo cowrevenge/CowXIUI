@@ -18,8 +18,9 @@ This README mirrors the config menu (`/xiui`). Every tab gets a section.
 4. Pick XIUI in the HorizonXI launcher, or `/addon load xiui`
 5. Open the config: `/xiui`
 6. Open the **Preset** tab and load the preset matching your resolution
+7. Turn on **Auto update** in Global if you want it to keep itself current
 
-Step 6 is new. Window layout used to be the one thing you set by hand. It now ships as a preset.
+Steps 6 and 7 are new. Window layout used to be the one thing you set by hand — it now ships as a preset. And you no longer need to re-download anything to stay up to date.
 
 ---
 
@@ -38,6 +39,7 @@ Upstream XIUI provides the module set: Player Bar, Target Bar, Party List, Enemy
 | **Preset** | Whole-layout save/load, per resolution |
 | **BovineLooty** | Auto-lot / auto-pass with rate limiting |
 | **Hideparty** | Native UI suppression, five signatures |
+| **Auto Update** | Self-updating straight from GitHub, no manifest to maintain |
 
 **Rewritten from upstream:**
 
@@ -54,11 +56,39 @@ Upstream XIUI provides the module set: Player Bar, Target Bar, Party List, Enemy
 
 ### Global
 
-General settings, fonts, and bar styling.
+General settings, updates, fonts, and bar styling.
 
 Lock HUD Position, status / job icon theme, tooltip scale, Hide During Events, font family / weight / outline, bar bookend style, health bar flash, bar roundness, border thickness, background and entity-name colours.
 
-**Fork changes:** bar effects (flash, roundness, border). Hide Native UI lives in its own **Hideparty** tab rather than being duplicated here.
+**Fork changes:** the auto-updater (below), plus bar effects (flash, roundness, border). Hide Native UI lives in its own **Hideparty** tab rather than being duplicated here.
+
+#### Auto Update
+
+**Original to this fork.** CowXIUI updates itself from GitHub. No release zips to download, no folder to delete and replace.
+
+Three controls at the top of Global:
+
+- **Auto update** (checkbox) — on load, check GitHub, download anything that changed, and reload the addon automatically
+- **Check Updates** — asks whether newer files exist. Reports only; writes nothing
+- **Update Now** — appears once a check finds changes. Downloads them and reloads
+
+An expandable list shows exactly which files would change before you commit to anything.
+
+**How it decides what to download.** Not by version number. Gating on `addon.version` assumes every push bumps it, and this repo gets fixes pushed constantly while the version moves rarely — a version gate would report "up to date" while your files were genuinely behind.
+
+Instead it compares content. GitHub's `git/trees` API returns every file in the repo with its size and blob SHA in a single request, which is effectively a manifest GitHub maintains automatically. The updater computes each local file's git blob SHA and compares. That's an exact content match, so an edit that leaves the file the same length is still caught. Hashing all ~130 Lua files costs about 100ms, far less than the network calls it saves.
+
+Changed files come from `raw.githubusercontent.com`, which isn't rate limited. The API is (60 req/hr), but it's only hit once per check.
+
+**What it touches.** Lua files only. Assets are deliberately excluded — the repo carries several thousand PNGs and syncing those would mean thousands of blocking requests. Art changes rarely; re-clone for that. `submodules/`, `settings/`, `tools/`, and `.github/` are skipped entirely.
+
+Module runtime state (`current_trial.json`, `dedication_state.json`) is back-filled if missing on a fresh install but never overwritten once it exists.
+
+**Safety.** `https.request()` is blocking and freezes the game thread, so the updater only ever runs on an explicit button press or a load-time check that's off by default — and it diffs first, so the download count is limited to files that actually changed.
+
+Writes are atomic: the download lands in a `.tmp`, the old file moves to `.bak`, and only then is the new file renamed into place. If anything fails the original is restored, so a broken download can never leave a truncated `.lua` behind.
+
+Overwriting files doesn't affect the running session since Lua is already in memory, so a successful update queues `/addon reload xiui`. Manual and automatic paths both go through the same code, so neither leaves you running stale code.
 
 ---
 
@@ -407,10 +437,16 @@ Clean dark-blue panel look, switchable in **Global → General**. Affects party 
 
 ## Updating
 
-1. Fresh, pre-configured install. Out of the box it ships in the intended look
-2. Before installing a new release, delete the old `XIUI` folder first. Asset directories change between versions and leftover files sometimes collide
-3. Re-load your resolution preset after updating if you want the shipped layout back
-4. Patch notes display automatically in-game on the first load after an update
+**Normally you don't.** Turn on **Auto update** in Global and CowXIUI pulls changed files from GitHub on load and reloads itself. Or hit **Check Updates** whenever you feel like it and **Update Now** if something's there. See the Auto Update section above.
+
+Manual reinstall is only needed when:
+
+- **Assets changed.** The updater only syncs `.lua` files. New icons, portraits, or textures need a fresh copy of the folder
+- **Something broke badly enough** that you want a known-good tree
+
+For a manual reinstall, delete the old `XIUI` folder first rather than copying over it. Asset directories change between versions and leftover files sometimes collide.
+
+Re-load your resolution preset after a manual reinstall if you want the shipped layout back.
 
 ---
 
@@ -424,7 +460,7 @@ Clean dark-blue panel look, switchable in **Global → General**. Affects party 
 
 - Upstream: [tirem/XIUI](https://github.com/tirem/XIUI) and its predecessor [tirem/HXUI](https://github.com/tirem/HXUI). Massive thanks to the original authors — the module set, config framework, and hotbar all come from there.
 - Hotbar concepts originally adapted from [XIVHotbar2](https://github.com/Technyze/XIVHotbar2) (SirEdeonX, Akirane, Technyze) under BSD licence.
-- **Original to this fork:** Pet HUD, Combat Timers, Latent Trial, Dedication, the Preset system, BovineLooty, integrated Hideparty (including spell/ability info suppression), the window position and anchor systems, click-to-target, click-to-debuff-cure, click-to-sub-target, sub-target follow, and the Enemy List / Party List / Cast Cost / Treasure Pool rewrites.
+- **Original to this fork:** Pet HUD, Combat Timers, Latent Trial, Dedication, the Preset system, BovineLooty, the GitHub self-updater, integrated Hideparty (including spell/ability info suppression), the window position and anchor systems, click-to-target, click-to-debuff-cure, click-to-sub-target, sub-target follow, and the Enemy List / Party List / Cast Cost / Treasure Pool rewrites.
 - Jug pet data from the [HorizonXI wiki](https://horizonffxi.wiki/Category:Familiars).
 - Weapon skill point values from the [HorizonXI wiki](https://horizonffxi.wiki/Weapon_Skill_Points).
 - Resting tick cadence verified against [LandSandBoat](https://github.com/LandSandBoat/server) server source.
