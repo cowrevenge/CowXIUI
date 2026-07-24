@@ -1075,6 +1075,35 @@ function M.DrawSettings(state)
     local selectedPetBarTab = state.selectedPetBarTab or 1;
     local selectedPetTypeTab = state.selectedPetTypeTab or 1;
 
+    -- Font override applies to the whole module, not per pet type -- the text
+    -- sizes below are per type, but one font for the bar as a whole.
+    if components.CollapsingSection('Font##petBar', false) then
+        components.DrawCheckbox('Override Font', 'petBarOverrideFont');
+        imgui.ShowHelp('Use a different font family and weight here instead of the Global Text Settings.');
+
+        if gConfig.petBarOverrideFont then
+            imgui.Indent(20);
+            components.DrawComboBox('Font Family##petBar', gConfig.petBarFontFamily or 'Default',
+                components.available_fonts, function(newValue)
+                    gConfig.petBarFontFamily = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+            imgui.ShowHelp('Default is imgui built-in bitmap font -- stays crisp at small sizes where the TTF families blur. Text Size has no effect on it.');
+
+            components.DrawComboBox('Font Weight##petBar', gConfig.petBarFontWeight or 'Normal',
+                {'Normal', 'Bold'}, function(newValue)
+                    gConfig.petBarFontWeight = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+
+            components.DrawSlider('Outline Width##petBar', 'petBarFontOutlineWidth', 0, 2);
+            imgui.ShowHelp('0 removes the black edge entirely.');
+            imgui.Unindent(20);
+        end
+    end
+
     -- Sync preview type with selected pet type tab
     local currentPetType = PET_TYPES[selectedPetTypeTab];
     if currentPetType and gConfig.petBarPreviewType ~= currentPetType.previewType then

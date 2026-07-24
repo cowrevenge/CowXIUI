@@ -38,6 +38,10 @@ function M.createUserSettingsDefaults()
         showBovinecombat = true,
         bovinecombatHidden = false,
         bovinecombatShowRestTick = true,
+        bovinecombatOverrideFont = false,
+        bovinecombatFontFamily = 'Default',
+        bovinecombatFontWeight = 'Normal',
+        bovinecombatFontOutlineWidth = 2,
         autoUpdateCheck = false,  -- on load: diff against repo, download changes, reload
 
         -- Treasure Pool settings
@@ -273,6 +277,18 @@ function M.createUserSettingsDefaults()
 
         enemyListScaleX = 1,
         enemyListScaleY = 1,
+        -- Font override: off follows Global Text Settings. 'Default' is
+        -- imgui's built-in bitmap font, which these modules used implicitly
+        -- before their text was routed through imtext -- crisp at small sizes
+        -- where the TTF families blur.
+        petBarOverrideFont = false,
+        petBarFontFamily = 'Default',
+        petBarFontWeight = 'Normal',
+        petBarFontOutlineWidth = 2,
+        enemyListOverrideFont = false,
+        enemyListFontFamily = 'Default',
+        enemyListFontWeight = 'Normal',
+        enemyListFontOutlineWidth = 2,
         enemyListNameFontSize = 10,
         enemyListDistanceFontSize = 8,
         enemyListPercentFontSize = 8,

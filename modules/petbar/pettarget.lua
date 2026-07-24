@@ -10,6 +10,7 @@ local imgui = require('imgui');
 local gdi = require('submodules.gdifonts.include');
 local windowBg = require('libs.windowbackground');
 local progressbar = require('libs.progressbar');
+local modulefont = require('libs.modulefont');
 
 local data = require('modules.petbar.data');
 
@@ -20,19 +21,16 @@ local pettarget = {};
 -- The panel is an imgui window; gdifont text renders behind it. Route text
 -- through imgui so it lands on top, keep the gdifont hidden.
 -- ============================================
-local function drawOutlinedText(x, y, text, fillColor)
+-- Font height for this frame, set by the pet bar before this draws.
+local petTargetFontHeight = nil;
+
+-- Same treatment as modules/petbar/display.lua: routed through modulefont so
+-- the configured font and size apply, instead of five TextColored passes
+-- locked to imgui's built-in font.
+local function drawOutlinedText(x, y, text, fillColor, size)
     if text == nil or text == '' then return; end
-    -- imgui.TextColored treats text as a printf format string; escape '%' so
-    -- strings like '100%' render the percent sign instead of eating it.
-    text = tostring(text):gsub('%%', '%%%%');
-    local saveX, saveY = imgui.GetCursorScreenPos();
-    local black = {0, 0, 0, 1};
-    imgui.SetCursorScreenPos({x - 1, y - 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x + 1, y - 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x - 1, y + 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x + 1, y + 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x, y});         imgui.TextColored(fillColor, text);
-    imgui.SetCursorScreenPos({saveX, saveY});
+    local dl = imgui.GetForegroundDrawList();
+    modulefont.DrawText(dl, x, y, text, fillColor, size or petTargetFontHeight);
 end
 
 local function u32ToRGBA(c)
@@ -52,10 +50,10 @@ local function petText(font, text, x, y, colorU32, height, alignment)
     if text == nil or text == '' then return; end
     local drawX = x;
     if alignment == 2 then
-        local tw = imgui.CalcTextSize(text);
+        local tw = modulefont.Measure(text, height or petTargetFontHeight);
         drawX = x - (tw or 0);
     end
-    drawOutlinedText(drawX, y, text, u32ToRGBA(colorU32));
+    drawOutlinedText(drawX, y, text, u32ToRGBA(colorU32), height);
 end
 
 -- ============================================

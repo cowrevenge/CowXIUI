@@ -127,6 +127,33 @@ function M.DrawSettings()
         if (gConfig.showEnemyListTargets) then
             components.DrawSlider('Target Text Size', 'enemyListTargetFontSize', 8, 36);
         end
+
+        imgui.Separator();
+
+        components.DrawCheckbox('Override Font', 'enemyListOverrideFont');
+        imgui.ShowHelp('Use a different font family and weight here instead of the Global Text Settings.');
+
+        if gConfig.enemyListOverrideFont then
+            imgui.Indent(20);
+            components.DrawComboBox('Font Family##enemyList', gConfig.enemyListFontFamily or 'Default',
+                components.available_fonts, function(newValue)
+                    gConfig.enemyListFontFamily = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+            imgui.ShowHelp('Default is imgui built-in bitmap font -- stays crisp at small sizes where the TTF families blur. Text Size has no effect on it.');
+
+            components.DrawComboBox('Font Weight##enemyList', gConfig.enemyListFontWeight or 'Normal',
+                {'Normal', 'Bold'}, function(newValue)
+                    gConfig.enemyListFontWeight = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+
+            components.DrawSlider('Outline Width##enemyList', 'enemyListFontOutlineWidth', 0, 2);
+            imgui.ShowHelp('0 removes the black edge entirely.');
+            imgui.Unindent(20);
+        end
     end
 
     if components.CollapsingSection('Debuffs##enemyList') then

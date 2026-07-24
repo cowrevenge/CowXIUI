@@ -17,6 +17,30 @@ function M.DrawSettings()
     components.DrawCheckbox('Show Resting Tick Countdown', 'bovinecombatShowRestTick');
     imgui.ShowHelp('Shows "Next Tick" countdown to the next resting HP/MP tick (resets on each tick packet, then counts down from 12s). The tick itself is 10s; the count runs to 12 because packets land +-2s, and it resets the moment one arrives. Only counts while resting.');
 
+    if components.CollapsingSection('Font##bovinecombat') then
+        components.DrawCheckbox('Override Font', 'bovinecombatOverrideFont');
+        imgui.ShowHelp('Use a different font family and weight here instead of the Global Text Settings.');
+
+        if gConfig.bovinecombatOverrideFont then
+            imgui.Indent(20);
+            components.DrawComboBox('Font Family##bovinecombat', gConfig.bovinecombatFontFamily or 'Default',
+                components.available_fonts, function(newValue)
+                    gConfig.bovinecombatFontFamily = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+            imgui.ShowHelp('Default is imgui built-in bitmap font -- stays crisp at small sizes where the TTF families blur.');
+
+            components.DrawComboBox('Font Weight##bovinecombat', gConfig.bovinecombatFontWeight or 'Normal',
+                {'Normal', 'Bold'}, function(newValue)
+                    gConfig.bovinecombatFontWeight = newValue;
+                    SaveSettingsOnly();
+                    UpdateUserSettings();
+                end);
+            imgui.Unindent(20);
+        end
+    end
+
     if components.CollapsingSection('Reset##bovinecombat') then
         if imgui.Button('Reset Timers##bovinecombat_reset') then
             local ok, mod = pcall(require, 'modules.bovinecombat.bovinecombat');

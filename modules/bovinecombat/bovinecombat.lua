@@ -22,6 +22,7 @@
 ]]--
 
 local imgui  = require('imgui');
+local imtext = require('libs.imtext');
 local struct = require('struct');
 
 local M = {};
@@ -595,6 +596,24 @@ function M.DrawWindow(settings)
     -- p_open gives a title-bar X; clicking it sets bovinecombatHidden so the
     -- window stays hidden until re-enabled from the config menu.
     local win_open = { true };
+    -- Font override.
+    --
+    -- This window uses imgui.Text rather than draw-list calls, so the font is
+    -- applied by PUSHING it for the window rather than passed per call. When
+    -- the override is off, or is set to 'Default', no font is pushed and the
+    -- built-in bitmap font is used -- which is what this window looked like
+    -- before, and stays crisp at small sizes.
+    local pushedFont = false;
+    if cfg and cfg.bovinecombatOverrideFont then
+        imtext.SetConfig(cfg.bovinecombatFontFamily or 'Default',
+            cfg.bovinecombatFontWeight == 'Bold',
+            cfg.bovinecombatFontOutlineWidth or 2);
+        local f = imtext.GetFont();
+        if f ~= nil then
+            pushedFont = pcall(imgui.PushFont, f);
+        end
+    end
+
     local drew = imgui.Begin('Combat Timers##bovinecombat', win_open, ImGuiWindowFlags_NoCollapse);
     if not win_open[1] and cfg then
         cfg.bovinecombatHidden = true;
@@ -643,6 +662,10 @@ function M.DrawWindow(settings)
         end
     end
     imgui.End();
+
+    if pushedFont then
+        imgui.PopFont();
+    end
 
     imgui.PopStyleColor(3);
     imgui.PopStyleVar(2);

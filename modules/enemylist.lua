@@ -32,6 +32,7 @@
 require('common');
 require('handlers.helpers');
 local imgui = require('imgui');
+local modulefont = require('libs.modulefont');
 local debuffHandler = require('handlers.debuffhandler');
 local statusHandler = require('handlers.statushandler');
 local colorLib = require('libs.color');
@@ -43,6 +44,27 @@ local allClaimedTargets = {};
 local entrySeq = 0;
 
 local enemylist = {};
+
+-- Per-element text size for this frame's draws.
+--
+-- The enemy list used bare imgui.AddText, which is locked to imgui's built-in
+-- font -- so the Name/Distance/HP%/Target size sliders did nothing. Text now
+-- goes through libs/modulefont (which wraps libs/imtext) so those sliders
+-- apply, and 'Default' remains selectable to keep the original crisp look.
+local elSize = nil;
+local function setElSize(sz) elSize = sz; end
+
+-- Draw at the current element size. Takes an RGBA float table; the call sites
+-- here all use plain white, so a single shared constant covers them.
+local EL_WHITE = { 1, 1, 1, 1 };
+local function elText(dl, x, y, text, rgba, size)
+    modulefont.DrawText(dl, x, y, text, rgba or EL_WHITE, size or elSize);
+end
+
+-- Measure at the size the text will be drawn at.
+local function elMeasure(text, size)
+    return modulefont.Measure(text, size or elSize);
+end
 local isHidden = false;
 
 -- Shift-drag move state.
@@ -102,6 +124,27 @@ end
 enemylist.DrawWindow = function(settings)
 	if isHidden then return; end
 	if not gConfig.showEnemyList then return; end
+
+	-- Font config for this frame. Applied here rather than per element because
+	-- imtext holds family/weight as module-level state shared with every other
+	-- caller -- without this the enemy list would inherit whatever the hotbar or
+	-- party list configured last.
+	modulefont.Apply(
+		gConfig.enemyListOverrideFont,
+		gConfig.enemyListFontFamily,
+		gConfig.enemyListFontWeight,
+		gConfig.enemyListFontOutlineWidth,
+		settings and settings.name_font_settings);
+
+	-- Per-element sizes, from the existing Text Size sliders. These were
+	-- previously ignored entirely because the draws used bare AddText.
+	local sizes = {
+		name     = (settings and settings.name_font_settings and settings.name_font_settings.font_height) or 10,
+		distance = (settings and settings.distance_font_settings and settings.distance_font_settings.font_height) or 8,
+		percent  = (settings and settings.percent_font_settings and settings.percent_font_settings.font_height) or 8,
+		target   = (settings and settings.target_font_settings and settings.target_font_settings.font_height) or 8,
+	};
+	setElSize(sizes.name);
 
 	local isPreviewMode = showConfig[1] and gConfig.enemyListPreview;
 	local entityMgr = GetEntitySafe();
@@ -384,7 +427,7 @@ enemylist.DrawWindow = function(settings)
 		if gConfig.showEnemyDistance and ent.Distance ~= nil then
 			local yalms = math.sqrt(ent.Distance);
 			dStr = ('%.1f'):format(yalms);
-			local w = imgui.CalcTextSize(dStr);
+			local w = elMeasure(dStr);
 			dx = right - padX - (w or 0);
 		end
 
@@ -396,23 +439,24 @@ enemylist.DrawWindow = function(settings)
 
 		-- Truncate with '..' when too wide (same rule as the target box).
 		local name = tostring(ent.Name or '');
-		local nameW = imgui.CalcTextSize(name);
+		local nameW = elMeasure(name);
 		if nameW and nameW > nameMaxW then
-			local dotsW = imgui.CalcTextSize('..');
+			local dotsW = elMeasure('..');
 			while #name > 1 do
 				name = name:sub(1, #name - 1);
-				local w = imgui.CalcTextSize(name);
+				local w = elMeasure(name);
 				if (w + dotsW) <= nameMaxW then break; end
 			end
 			name = name .. '..';
 		end
 
-		drawList:AddText({nx + 1, line1Y + 1}, textBlack, name);
-		drawList:AddText({nx, line1Y}, textCol, name);
+		-- One call: imtext draws the outline itself, so the separate black
+		-- shadow pass these used is no longer needed.
+		setElSize(sizes.name);
+		elText(drawList, nx, line1Y, name);
 
 		if dStr then
-			drawList:AddText({dx + 1, line1Y + 1}, textBlack, dStr);
-			drawList:AddText({dx, line1Y}, textCol, dStr);
+			elText(drawList, dx, line1Y, dStr, nil, sizes.distance);
 		end
 
 		-- ===== LINE 2: HP bar (full width) with HP% overlaid right =====
@@ -436,11 +480,10 @@ enemylist.DrawWindow = function(settings)
 		-- HP% overlaid on the bar, right-aligned
 		if gConfig.showEnemyHPPText then
 			local hpStr = ('%.0f%%'):format(hpp);
-			local w, h = imgui.CalcTextSize(hpStr);
+			local w, h = elMeasure(hpStr);
 			local hx = hpRight - padX - (w or 0);
 			local hy = barTop + (barH - (h or 12)) / 2;
-			drawList:AddText({hx + 1, hy + 1}, textBlack, hpStr);
-			drawList:AddText({hx, hy}, textCol, hpStr);
+			elText(drawList, hx, hy, hpStr, nil, sizes.percent);
 		end
 
 		-- Debuff icons (ALL active debuffs), in a row from the anchor edge.
@@ -520,7 +563,7 @@ enemylist.DrawWindow = function(settings)
 				local tOffX = (gConfig.enemyListTargetOffsetX or 10) + 6;  -- +6px gap so it doesn't touch the entry
 				-- Box width: configured width + room for ~2 extra characters.
 				local extraChars = 2;
-				local charW = imgui.CalcTextSize('W');  -- approx per-char width
+				local charW = elMeasure('W');  -- approx per-char width
 				local tW    = (gConfig.enemyListTargetWidth or 100) + (extraChars * (charW or 8));
 				local tx0   = right + tOffX;
 				-- Anchor to the EXACT HP bar rectangle Y: same top and bottom as
@@ -534,13 +577,13 @@ enemylist.DrawWindow = function(settings)
 				-- trim and append '..' so it fills to the last two slots.
 				local innerW = tW - 8;  -- 4px padding each side
 				local shown = tostring(targetName);
-				local sw = imgui.CalcTextSize(shown);
+				local sw = elMeasure(shown);
 				if sw and sw > innerW then
 					-- Trim characters until "<trimmed>.." fits.
-					local dotsW = imgui.CalcTextSize('..');
+					local dotsW = elMeasure('..');
 					while #shown > 1 do
 						shown = shown:sub(1, #shown - 1);
-						local w = imgui.CalcTextSize(shown);
+						local w = elMeasure(shown);
 						if (w + dotsW) <= innerW then break; end
 					end
 					shown = shown .. '..';
@@ -553,10 +596,9 @@ enemylist.DrawWindow = function(settings)
 				drawList:AddRectFilled({tx0, ty0}, {tx0 + tW, ty1}, tFill, 3);
 				drawList:AddRect({tx0, ty0}, {tx0 + tW, ty1}, tBord, 3, 15, 1.0);
 				-- Target name, vertically centered in the box.
-				local _, tnH = imgui.CalcTextSize(shown);
+				local _, tnH = elMeasure(shown);
 				local tnY = tCenterY - ((tnH or 12) / 2);
-				drawList:AddText({tx0 + 4 + 1, tnY + 1}, textBlack, shown);
-				drawList:AddText({tx0 + 4, tnY}, textCol, shown);
+				elText(drawList, tx0 + 4, tnY, shown, nil, sizes.target);
 			end
 		end
 

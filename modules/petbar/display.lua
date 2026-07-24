@@ -8,6 +8,7 @@ require('handlers.helpers');
 local imgui = require('imgui');
 local ffi = require('ffi');
 local progressbar = require('libs.progressbar');
+local modulefont = require('libs.modulefont');
 
 local data = require('modules.petbar.data');
 local color = require('libs.color');
@@ -23,19 +24,21 @@ local display = {};
 -- ============================================================================
 
 -- 1px black 4-direction outline, drawn via imgui so it's on the imgui layer.
-local function drawOutlinedText(x, y, text, fillColor)
+-- Font height for this frame's text, set in the draw entry point.
+local petFontHeight = nil;
+
+-- Routed through libs/modulefont (which wraps libs/imtext) so the pet bar's
+-- Text Size slider and font settings apply. The previous implementation drew
+-- five imgui.TextColored passes to fake an outline, which meant the text was
+-- locked to imgui's built-in font at its default size -- imtext draws the
+-- outline itself at the requested size.
+--
+-- No '%' escaping needed any more: that was only required because
+-- TextColored treats its argument as a printf format string.
+local function drawOutlinedText(x, y, text, fillColor, size)
     if text == nil or text == '' then return; end
-    -- imgui.TextColored treats text as a printf format string; escape '%' so
-    -- strings like '100%' render the percent sign instead of eating it.
-    text = tostring(text):gsub('%%', '%%%%');
-    local saveX, saveY = imgui.GetCursorScreenPos();
-    local black = {0, 0, 0, 1};
-    imgui.SetCursorScreenPos({x - 1, y - 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x + 1, y - 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x - 1, y + 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x + 1, y + 1}); imgui.TextColored(black, text);
-    imgui.SetCursorScreenPos({x, y});         imgui.TextColored(fillColor, text);
-    imgui.SetCursorScreenPos({saveX, saveY});
+    local dl = imgui.GetForegroundDrawList();
+    modulefont.DrawText(dl, x, y, text, fillColor, size or petFontHeight);
 end
 
 -- Convert a U32 ARGB color (e.g. 0xFFRRGGBB) to an imgui {r,g,b,a} float table.
@@ -58,10 +61,10 @@ local function petText(font, text, x, y, colorU32, height, alignment)
     if text == nil or text == '' then return; end
     local drawX = x;
     if alignment == 2 then
-        local tw = imgui.CalcTextSize(text);
+        local tw = modulefont.Measure(text, height or petFontHeight);
         drawX = x - (tw or 0);
     end
-    drawOutlinedText(drawX, y, text, u32ToRGBA(colorU32));
+    drawOutlinedText(drawX, y, text, u32ToRGBA(colorU32), height);
 end
 
 -- Window state for bottom alignment
@@ -464,6 +467,18 @@ end
 -- DrawWindow - Main Pet Bar Rendering
 -- ============================================
 function display.DrawWindow(settings)
+    -- Font config + size for this frame. imtext holds family/weight as
+    -- module-level state shared with every other caller, so this has to be
+    -- re-applied here or the pet bar inherits whatever drew last.
+    modulefont.Apply(
+        gConfig.petBarOverrideFont,
+        gConfig.petBarFontFamily,
+        gConfig.petBarFontWeight,
+        gConfig.petBarFontOutlineWidth,
+        settings and settings.name_font_settings);
+    petFontHeight = (settings and settings.name_font_settings
+        and settings.name_font_settings.font_height) or nil;
+
     -- Get pet data from data module (handles preview internally)
     local petData = data.GetPetData();
 
