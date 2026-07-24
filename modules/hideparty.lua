@@ -15,6 +15,10 @@
                 FFXiMain.dll data section, so we resolve it as `target - 4`.
                 Discovered empirically with the dumpprims debug addon.
 
+  Note on `target`: this primitive covers BOTH the target box and the arrow
+  drawn above the target's head. The game renders them from the same slot, so
+  hiding one hides the other. It does NOT affect the selector.
+
   Defaults: all five elements hidden.
 
   Self-registers three Ashita events under unique callback names so it can't
@@ -65,7 +69,7 @@ local function get_settings()
         party0   = (cfg.party0   ~= false),  -- default true (hide main party)
         party1   = (cfg.party1   ~= false),  -- default true (hide alliance 1)
         party2   = (cfg.party2   ~= false),  -- default true (hide alliance 2)
-        target   = (cfg.target   ~= false),  -- default true (hide target cursor)
+        target   = (cfg.target   ~= false),  -- default true (hide target box + head arrow)
         castinfo = (cfg.castinfo ~= false),  -- default true (hide spell/ability info window)
     };
 end

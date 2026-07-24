@@ -60,9 +60,11 @@ function hidepartyConfigUI.DrawSettings()
         end
 
         local target = { h.target };
-        if imgui.Checkbox('Hide Native Target Cursor', target) then
+        if imgui.Checkbox('Hide Target Box', target) then
             h.target = target[1];
         end
+        imgui.SameLine();
+        imgui.TextDisabled('(also hides the arrow above the target)');
 
         local castinfo = { h.castinfo };
         if imgui.Checkbox('Hide Spell/Ability Info Window', castinfo) then

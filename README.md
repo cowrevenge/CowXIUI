@@ -16,11 +16,13 @@ This README mirrors the config menu (`/xiui`). Every tab gets a section.
 2. Extract, rename `CowXIUI-main` to `XIUI`
 3. Replace the existing `XIUI` folder in `HorizonXI\Game\addons`
 4. Pick XIUI in the HorizonXI launcher, or `/addon load xiui`
-5. Open the config: `/xiui`
-6. Open the **Preset** tab and load the preset matching your resolution
-7. Turn on **Auto update** in Global if you want it to keep itself current
+5. **Turn OFF HXUI in the launcher.** Running both at once gives you two of every window
+6. Add `/addon load XIUI` to your default script so it loads every session
+7. Open the config: `/xiui`
+8. Open the **Preset** tab and load the preset matching your resolution
+9. Turn on **Auto update** in Global if you want it to keep itself current
 
-Steps 6 and 7 are new. Window layout used to be the one thing you set by hand — it now ships as a preset. And you no longer need to re-download anything to stay up to date.
+Steps 8 and 9 are new. Window layout used to be the one thing you set by hand — it now ships as a preset. And you no longer need to re-download anything to stay up to date.
 
 ---
 
@@ -179,14 +181,16 @@ Inherited, no major changes.
 
 Hide FFXI's native UI elements. Built in, so atom0s's standalone hideparty addon isn't needed.
 
-**Extended vs the standalone addon.** Stock hideparty ships four signatures. CowXIUI adds a fifth: the **spell / ability info window** (the "Blizzard III MP: 120 Recast: 27s" tooltip and its job-ability cousin). That primitive's slot was found relative to the target cursor slot (`target_slot − 4 bytes`) with a primitive enumerator.
+**Extended vs the standalone addon.** Stock hideparty ships four signatures.
+CowXIUI adds a fifth: the **spell / ability info window** (the "Blizzard III MP: 120 Recast: 27s" tooltip and its job-ability cousin).
+That primitive's slot was found relative to the `target` primitive slot (`target − 4 bytes`) with a primitive enumerator.
 
 Five toggles:
 
 - Main party (members 1-6)
 - Alliance 1 (members 7-12)
 - Alliance 2 (members 13-18)
-- Native target cursor (the in-world arrow)
+- Target Box and the in-game arrow above the target's head — see Known Todo
 - Spell / ability info window
 
 Defaults to hiding all five. Restores everything on unload, so toggling XIUI off never leaves you without UI.
@@ -198,11 +202,6 @@ Defaults to hiding all five. Restores everything on unload, so toggling XIUI off
 Configurable action bar with controller / crossbar support. Inherited from upstream, which in turn adapts concepts from Windower's [XIVHotbar2](https://github.com/Technyze/XIVHotbar2) under BSD licence.
 
 Six independent bars, crossbar mode with hold-to-show triggers, macro palettes, pet palettes, skillchain highlighting, live recast tracking, per-slot MP cost display, and full colour customisation.
-
-**Commands:**
-
-- `/xiui hotbar <bar> <...>` — direct bar manipulation
-- `/xiui palette` or `/xiui pal` — palette management
 
 ---
 
@@ -264,15 +263,20 @@ The largest module by a wide margin. **Rewritten in this fork** around the ancho
 **Interaction (original to this fork):**
 
 - **Click-to-target.** Click a member to target them. Works during sub-target mode too
-- **Click-to-debuff-cure.** Click a member's debuff icon and CowXIUI fires the matching White Magic remover. Self-casts on `<me>`, party members cured by name. Knows Paralyna, Silena, Stona, Erase, Blindna, Cursna, Viruna, Poisona
-- **Click-to-sub-target.** Click a member mid-sub-target and CowXIUI walks the game's own cursor there by simulating arrow-key presses. Wrap-aware shortest path — 6-party with the cursor on row 4 and you click row 2 sends `up 2`, not `down 4`. You press Enter to confirm. Routed through Ashita's input manager so the game runs all its own validation; no memory writes into the target manager
-- **Sub-target follow.** Fire `/ma "Cure" <stpc>` and the anchored Target Bar swaps to whoever the cursor is on instead of staying glued to the held mob. Arrow-key the cursor and the bar tracks it. Snaps back when sub-targeting ends
-- **Shift+drag.** Plain click targets the member under the cursor; the window only moves while Shift is held. Click-vs-drag is resolved by movement threshold rather than an invisible button, so drags pass straight through to imgui
-- **Cure buttons** on party rows (off by default)
+- **Click-to-debuff-cure.** Click a member's debuff icon and CowXIUI fires the matching White Magic remover. Self-casts on `<me>`, party members cured by name.
+  Knows Paralyna, Silena, Stona, Erase, Blindna, Cursna, Viruna, Poisona
+- **Click-to-sub-target.** Click a member mid-sub-target and CowXIUI walks the game's own cursor there by simulating arrow-key presses.
+  Wrap-aware shortest path — 6-party with the cursor on row 4 and you click row 2 sends `up 2`, not `down 4`. You press Enter to confirm.
+Routed through Ashita's input manager so the game runs all its own validation; no memory writes into the target manager
+- **Sub-target follow.** Fire `/ma "Cure" <stpc>` and the anchored Target Bar swaps to whoever the cursor is on instead of staying glued to the held mob.
+  Arrow-key the cursor and the bar tracks it. Snaps back when sub-targeting ends
+- **Shift+drag.** Plain click targets the member under the cursor; the window only moves while Shift is held.
+  Click-vs-drag is resolved by movement threshold rather than an invisible button, so drags pass straight through to imgui
 
 **Anchoring:**
 
-- **Anti-flicker on the Target Bar.** The anchor system retains last-known dimensions across invalidations, so the bar lands correctly on the first frame instead of drawing in the wrong place for one frame after re-acquiring a target
+- **Anti-flicker on the Target Bar.**
+  The anchor system retains last-known dimensions across invalidations, so the bar lands correctly on the first frame instead of drawing in the wrong place for one frame after re-acquiring a target
 - **Cast Cost stacking coordination.** When the Target Bar is enabled but no target is held this frame, Cast Cost stacks flush against the party panel instead of leaving a phantom gap
 
 ---
@@ -284,10 +288,12 @@ The largest module by a wide margin. **Rewritten in this fork** around the ancho
 - HP / TP / MP tracking, plus the BST Ready-charge counter
 - Pet portrait images for jug pets, wyverns, all 14 avatars, and spirits
 - Pet buff / debuff panel (Stoneskin, Regen, Haste and friends visible on your pet)
-- **Charm duration timer** using the PetMe formula with a full 16-slot gear scan and the Familiar +25 min extension. Uses the LSB quintic formula on character level, which is what HorizonXI actually runs — not the BST-level formula from retail references
+- **Charm duration timer** using the PetMe formula with a full 16-slot gear scan and the Familiar +25 min extension.
+  Uses the LSB quintic formula on character level, which is what HorizonXI actually runs — not the BST-level formula from retail references
 - **Jug duration timer** backed by an HzXI-accurate pet database, 27 pets sourced from the wiki. Ready charges are 45s on HorizonXI, not retail's 30s
 - BST ready-moves list with damage-type icons
-- Ability recasts tracked: Reward, Call Beast, Call Wyvern, Spirit Link, Steady Wing, Deep Breathing, Apogee, Mana Cede, Astral Flow, plus the PUP set (Activate, Deactivate, Deploy, Retrieve, Repair, Deus Ex Automata)
+- Ability recasts tracked:
+  Reward, Call Beast, Call Wyvern, Spirit Link, Steady Wing, Deep Breathing, Apogee, Mana Cede, Astral Flow, plus the PUP set (Activate, Deactivate, Deploy, Retrieve, Repair, Deus Ex Automata)
 - **Clickable.** Any ability or ready-move row fires the matching `/ja` or `/pet`. No macros required
 - **2-hour confirmation.** Clicking a 2-hour (Astral Flow, Familiar, Spirit Surge, Overdrive) arms it and prompts "click again to confirm" so you can't fire it by accident
 - **Click-to-summon** when no pet is out: Call Wyvern on DRG, Call Beast on BST
@@ -304,7 +310,8 @@ The largest module by a wide margin. **Rewritten in this fork** around the ancho
 
 Your HP / MP / TP / buffs in a floating bar.
 
-**Fork changes:** HP/MP/TP text rendering converted from gdi font primitives to the imgui foreground draw list so text renders on top of the bars. Rest countdown offset, per-value text alignment and offsets, and a TP flash toggle.
+**Fork changes:** HP/MP/TP text rendering converted from gdi font primitives to the imgui foreground draw list so text renders on top of the bars.
+Rest countdown offset, per-value text alignment and offsets, and a TP flash toggle.
 
 ---
 
@@ -312,11 +319,14 @@ Your HP / MP / TP / buffs in a floating bar.
 
 **Original to this fork.** Save and load your entire UI configuration, per screen resolution.
 
-Window positions are absolute pixels, so a layout built at 2560x1440 lands off-screen at 1920x1080. Rather than rescale at runtime — which never quite works, since fonts and bar widths don't scale linearly with the viewport — each resolution gets its own file.
+Window positions are absolute pixels, so a layout built at 2560x1440 lands off-screen at 1920x1080.
+Rather than rescale at runtime — which never quite works, since fonts and bar widths don't scale linearly with the viewport — each resolution gets its own file.
 
 **A preset captures everything:** all 500+ settings, every colour and gradient, every scale and offset, and all window positions. Loading one applies immediately, no reload.
 
-**Shipped presets:** 2560x1440, 1920x1080, 1600x900, 1366x768, 1280x720. The lower-resolution files derive from the 1440p layout with positions and sizes scaled per anchor class — right-edge elements stay pinned right, centered elements stay centered, bottom-anchored elements keep their relationship to the bottom edge. Font sizes scale with a floor of 10px so nothing becomes unreadable.
+**Shipped presets:** 2560x1440, 1920x1080, 1600x900, 1366x768, 1280x720.
+The lower-resolution files derive from the 1440p layout with positions and sizes scaled per anchor class — right-edge elements stay pinned right,
+centered elements stay centered, bottom-anchored elements keep their relationship to the bottom edge. Font sizes scale with a floor of 10px so nothing becomes unreadable.
 
 Only the preset matching your current resolution is offered for loading, which is the whole point of the per-resolution split.
 
@@ -364,18 +374,6 @@ The safety model matters here, because packet spam gets people flagged:
 
 No packets are parsed. The live pool model is read fresh each tick, so there's no stale-slot race.
 
-**Commands:**
-
-- `/xiui bvl` — toggle the Looty window
-- `/xiui bvl start` / `stop` / `toggle` — control the run state
-- `/xiui bvl addlot <id>` — add an item ID to Auto-Lot
-- `/xiui bvl addpass <id>` — add an item ID to Auto-Pass
-- `/xiui bvl rm <id>` — remove an ID from either list
-- `/xiui bvl load` / `save` — manage the config file
-- `/xiui lot` or `/xiui lotall` — lot every unlotted item right now
-- `/xiui pass` or `/xiui passall` — pass every unlotted item right now
-- `/xiui tp` — force show / hide the treasure pool window
-
 ---
 
 ## Cross-cutting Systems
@@ -389,7 +387,8 @@ Every XIUI window stores its position in `gConfig.windowPositions`, so positions
 - Positions are captured on the first frame a window renders, whether or not you've ever dragged it
 - Changes flush to disk once stable for a second, so dragging doesn't produce a write per frame
 - On load, any window lacking an entry is seeded from `imgui.ini`, filtered to XIUI's own windows, with off-screen coordinates clamped back into the viewport
-- Anchored windows (in-party Target Bar, anchored Cast Cost, chained Party Lists 2/3, snapped Mob Info, stacked notifications) skip both save and apply while anchored, since their position is derived rather than chosen
+- Anchored windows (in-party Target Bar, anchored Cast Cost, chained Party Lists 2/3, snapped Mob Info, stacked notifications) skip both save and apply while anchored,
+  since their position is derived rather than chosen
 
 ### Window Anchor System
 
@@ -415,7 +414,8 @@ Routed through the game's own keyboard input path rather than memory writes, so 
 
 ### Modern Theme
 
-Clean dark-blue panel look, switchable in **Global → General**. Affects party list, alliance lists, in-party Target Bar, and Cast Cost together. Cast Cost keeps an independent toggle if you want the panels split. `patternedBackground` re-enables the old texture on top of the modern base.
+Clean dark-blue panel look, switchable in **Global → General**. Affects party list, alliance lists, in-party Target Bar, and Cast Cost together.
+Cast Cost keeps an independent toggle if you want the panels split. `patternedBackground` re-enables the old texture on top of the modern base.
 
 ---
 
@@ -425,23 +425,28 @@ Clean dark-blue panel look, switchable in **Global → General**. Affects party 
 2. Extract the `.zip`. You'll get a directory called `CowXIUI-main`
 3. Rename it to `XIUI`. The addon registers internally as `xiui`, so the folder name must match
 4. **Delete your existing `XIUI` folder** in `HorizonXI\Game\addons` and drop this one in its place. This is a complete install, not an overlay
-5. Coming from the old HXUI fork? Leave the `HXUI` folder where it is as a fallback
+5. Coming from the old HXUI fork? Leave the `HXUI` folder on disk as a fallback — just don't load it
 6. Copy the new `XIUI` folder into `HorizonXI\Game\addons`
-7. **Recommended:** select XIUI in the HorizonXI launcher so it auto-loads
-8. Don't load both XIUI and HXUI at once. You can, but you'll be very confused
-9. Manual load in-game: `/addon load xiui`
-10. Open the config: `/xiui`
+7. **Turn OFF HXUI in the HorizonXI launcher.** They both draw party lists, target bars, and player bars, so running both gives you two of everything stacked on top of each other
+8. **Add `/addon load XIUI` to your default script** so it loads every session, at `HorizonXI\Game\scripts\defaults.txt`.
+   **Edit only where the file says to edit** — not in the list of other plugins
+9. Manual load in-game if you need it: `/addon load xiui`
+10. Open the config by typing in game: `/xiui`
 11. **Preset tab → Load Preset** for your resolution
+12. **Global → Auto update** if you want it to keep itself current
 
 ---
 
 ## Updating
 
-**Normally you don't.** Turn on **Auto update** in Global and CowXIUI pulls changed files from GitHub on load and reloads itself. Or hit **Check Updates** whenever you feel like it and **Update Now** if something's there. See the Auto Update section above.
+**Normally you don't.**
+
+Just turn on **Auto update** in Global (/xiui) and CowXIUI pulls changed files from GitHub on load and reloads itself.
+
+Or hit **Check Updates** whenever you feel like it and **Update Now** if something's there. See the Auto Update section above.
 
 Manual reinstall is only needed when:
 
-- **Assets changed.** The updater only syncs `.lua` files. New icons, portraits, or textures need a fresh copy of the folder
 - **Something broke badly enough** that you want a known-good tree
 
 For a manual reinstall, delete the old `XIUI` folder first rather than copying over it. Asset directories change between versions and leftover files sometimes collide.
@@ -452,15 +457,29 @@ Re-load your resolution preset after a manual reinstall if you want the shipped 
 
 ## Known Todo
 
-- Anchored Target Bar (in-party): treasure / status icons aren't rendering on it yet, and NPC status isn't read correctly. Sub-target follow, flicker, and stacking are all sorted.
+**Bugs / incomplete**
+
+- **Sub-target clicking** needs more work
+
+**Planned**
+
+- Bring back the HXUI-style **Cure buttons** on party rows (not carried over into this fork)
+- A modern **ability recast timer** panel, built or borrowed
+
+**Known limitation**
+
+- The Target Box toggle also hides the **in-game arrow above the target's head**. The game draws both from the same primitive, so I haven't found a way to separate them without .dat edits
 
 ---
 
 ## Credits and License
 
-- Upstream: [tirem/XIUI](https://github.com/tirem/XIUI) and its predecessor [tirem/HXUI](https://github.com/tirem/HXUI). Massive thanks to the original authors — the module set, config framework, and hotbar all come from there.
+- Upstream: [tirem/XIUI](https://github.com/tirem/XIUI) and its predecessor [tirem/HXUI](https://github.com/tirem/HXUI).
+  Massive thanks to the original authors — the module set, config framework, and hotbar all come from there.
 - Hotbar concepts originally adapted from [XIVHotbar2](https://github.com/Technyze/XIVHotbar2) (SirEdeonX, Akirane, Technyze) under BSD licence.
-- **Original to this fork:** Pet HUD, Combat Timers, Latent Trial, Dedication, the Preset system, BovineLooty, the GitHub self-updater, integrated Hideparty (including spell/ability info suppression), the window position and anchor systems, click-to-target, click-to-debuff-cure, click-to-sub-target, sub-target follow, and the Enemy List / Party List / Cast Cost / Treasure Pool rewrites.
+- **Original to this fork:** Pet HUD, Combat Timers, Latent Trial, Dedication, the Preset system, BovineLooty,
+  the GitHub self-updater, integrated Hideparty (including spell/ability info suppression), the window position and anchor systems,
+click-to-target, click-to-debuff-cure, click-to-sub-target, sub-target follow, and the Enemy List / Party List / Cast Cost / Treasure Pool rewrites.
 - Jug pet data from the [HorizonXI wiki](https://horizonffxi.wiki/Category:Familiars).
 - Weapon skill point values from the [HorizonXI wiki](https://horizonffxi.wiki/Weapon_Skill_Points).
 - Resting tick cadence verified against [LandSandBoat](https://github.com/LandSandBoat/server) server source.
@@ -470,4 +489,5 @@ Re-load your resolution preset after a manual reinstall if you want the shipped 
 
 ## Issues and Contributions
 
-Bug reports and feature requests specific to this fork: [CowXIUI issue tracker](https://github.com/cowrevenge/CowXIUI/issues). Please don't file them upstream against tirem/XIUI or tirem/HXUI; the original maintainers aren't responsible for fork behaviour. PRs welcome.
+Bug reports and feature requests specific to this fork: [CowXIUI issue tracker](https://github.com/cowrevenge/CowXIUI/issues).
+Please don't file them upstream against tirem/XIUI or tirem/HXUI; the original maintainers aren't responsible for fork behaviour. PRs welcome.
