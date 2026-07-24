@@ -74,8 +74,8 @@ local baseWindowFlags = nil;
 local playerbar = {
 	interpolation = {},
 	-- Resting tick tracker. Per LSB, the Healing effect ticks every 10s but the
-	-- first tick heals nothing, so the first actual HP/MP gain is at 20s, then
-	-- every 10s. startTime is the os.clock() when resting began;
+	-- cycle is synced to the first observed MP gain, then runs every 10s.
+	-- startTime is the os.clock() when resting began;
 	-- wasResting gates the reset so we only stamp startTime on the rising edge.
 	restingTicker = {
 		startTime = 0,
@@ -357,7 +357,7 @@ playerbar.DrawWindow = function(settings)
 		progressbar.ProgressBar(hpPercentData, {barSize, settings.barHeight}, {decorate = gConfig.showPlayerBarBookends});
 
 		-- Resting tick shimmer + countdown. Player Status 33 == resting/healing.
-		-- First heal lands 20s after resting starts, then every 10s. The shimmer is a
+		-- Cycle syncs to the first observed MP gain, then every 10s. The shimmer is a
 		-- gradient wave that sweeps the HP bar as a visual countdown; the numeric
 		-- countdown-to-next-tick is drawn as standalone text near the player bar.
 		if playerEnt.Status == 33 then
@@ -370,17 +370,35 @@ playerbar.DrawWindow = function(settings)
 			end
 
 			local elapsed = tickerTime - ticker.startTime;
-			-- Progress 0..1 through the current tick interval. Per LSB: the
-			-- Healing effect ticks every 10s, but tick #1 heals nothing
-			-- (healing.lua guards `healtime > 1`), so the first actual HP/MP
-			-- gain is at 20s, then every 10s. The numeric countdown lives in
-			-- the Combat Timers window.
+			-- Progress 0..1 through the current tick interval.
+			--
+			-- Taken from modules/bovinecombat, which watches for the actual MP
+			-- gain, anchors the phase to that observation and then runs pure
+			-- 10s arithmetic. Sharing its value keeps this shimmer in lockstep
+			-- with the numeric countdown -- if both guessed separately they
+			-- would visibly drift apart.
+			--
+			-- The 10s cycle is exact (measured 9.98s over six intervals). The
+			-- FIRST gain is not: it landed anywhere from 20.1s to 23.2s across
+			-- runs, because resting syncs you into a cycle already in progress.
+			-- Hence the estimate below is only a stand-in until a real tick is
+			-- seen.
 			local progress;
-			if elapsed < 20 then
-				progress = elapsed / 20;
-			else
-				local intoCycle = (elapsed - 20) % 10;
-				progress = intoCycle / 10;
+			local okp, bc = pcall(require, 'modules.bovinecombat.bovinecombat');
+			if okp and bc ~= nil and type(bc.GetRestTickProgress) == 'function' then
+				progress = bc.GetRestTickProgress();
+			end
+			if progress == nil then
+				-- Fallback when the module isn't loaded. Sweeps over 12s rather
+				-- than 10 for the same reason the module does: packets land
+				-- +-2s around the grid, and finishing at exactly 10 would
+				-- restart the wave while a late one was still pending.
+				if elapsed < 21 then
+					progress = elapsed / 21;
+				else
+					local intoCycle = (elapsed - 21) % 12;
+					progress = intoCycle / 12;
+				end
 			end
 
 			-- Sweeping shimmer on the HP bar (optional, on by default).

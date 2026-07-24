@@ -21,7 +21,8 @@
 * this module's own registration (removed in Cleanup).
 ]]--
 
-local imgui = require('imgui');
+local imgui  = require('imgui');
+local struct = require('struct');
 
 local M = {};
 
@@ -36,19 +37,55 @@ local BURST_WINDOW_SEC       = 0.35;  -- collapse multi-hit rounds
 -- FFXI resting HP/MP tick cadence, per LSB (LandSandBoat) server source:
 --   0x0e8_camp.cpp creates the Healing status effect on /heal with
 --   tick = map.HEALING_TICK_DELAY (default 10s). The effect then ticks
---   uniformly every 10s -- there is no special longer first interval.
---   scripts/effects/healing.lua guards with `if healtime > 1`, so tick #1
---   (at 10s) heals nothing; the FIRST ACTUAL HP/MP gain is tick #2 at 20s,
---   then every 10s after.
--- The timer is per-player and starts from your own /heal, not a global
--- server tick, so counting from the Status 33 edge is correct.
-local REST_FIRST_TICK_SEC  = 20.0;
+--   uniformly every 10s.
+--
+-- MEASURED on HorizonXI with the bovineresttest addon (wall clock):
+--   subsequent interval  9.98s over 6 intervals -- a clean 10s
+--   first packet         20.1 / 20.6 / 20.97 / 22.2 / 22.7 / 23.2s
+--
+-- The 10s cycle is exact. The FIRST packet is not, and LSB explains why:
+-- scripts/effects/healing.lua wraps its whole body in `if healtime > 1`, so
+-- tick #1 does nothing at all -- no HP, no MP, no TP, and therefore no packet.
+-- The first packet we can see is tick #2, roughly two cycles in, and where it
+-- lands depends on when you sat relative to the server's cycle.
+--
+-- 21 is the opening estimate only. It is replaced the moment the first packet
+-- arrives, so its accuracy matters for a few seconds at most.
+local REST_FIRST_TICK_SEC  = 21.0;
 local REST_CYCLE_SEC       = 10.0;
 
--- Rest tracking state. rest_start_ts is os.clock() when resting began;
--- was_resting gates the reset so we only stamp on the rising edge.
-local rest_start_ts = 0.0;
-local was_resting   = false;
+-- Both the countdown and the shimmer run over this span rather than
+-- REST_CYCLE_SEC.
+--
+-- Packets land roughly +-2s around the 10s grid. Counting down from 10 would
+-- hit zero and wrap while a late packet was still pending -- the readout would
+-- restart and the shimmer would begin a second sweep, both implying a tick
+-- that hadn't happened. Running to 12 keeps them travelling through the late
+-- window instead.
+--
+-- Showing 12 is not overstating the interval, because an EARLY packet resets
+-- the display the moment it lands: the count never actually reaches 12 unless
+-- the tick is genuinely that late. It reads as "up to 12s" rather than a
+-- promise of 12.
+--
+-- REST_CYCLE_SEC stays 10 and remains the truth for the anchor grid and the
+-- packet plausibility window -- only the DISPLAY uses this span.
+local REST_DISPLAY_SPAN_SEC = 12.0;
+
+-- Plausibility windows for accepting an MP gain as a rest tick.
+-- FIRST covers the observed 20.1-23.2s spread with margin. CYCLE_TOL is 2.5
+-- rather than 2.0 because measured intervals alias to ~9 or ~12 (the frame
+-- poll beats against the server's 10s tick) -- a tighter band rejects real
+-- ticks at the boundary.
+local FIRST_MIN, FIRST_MAX = 19.0, 24.0;
+local CYCLE_TOL            = 2.5;
+
+-- Rest tracking state.
+local rest_start_ts = 0.0;   -- when resting was detected
+local was_resting   = false; -- gates the rising-edge reset
+local anchor_ts     = 0.0;   -- phase anchor: set ONCE, corrected only by whole cycles
+local tick_seen_ts  = 0.0;   -- when a tick was last actually observed (display only)
+local synced        = false; -- true once a real tick has anchored the cycle
 
 local hidden                = false;
 local text_event_registered = false;
@@ -102,27 +139,279 @@ local function is_resting()
     return ent ~= nil and ent.Status == ENTITY_STATUS_RESTING;
 end
 
--- Track the resting rising/falling edge and return seconds until the next
--- HP/MP tick (nil when not resting). Called once per frame from DrawWindow.
+-- Packet-driven tick detection.
+--
+-- Polling every frame can only see a tick on the next frame after it lands,
+-- and the frame rate beats against the server's 10s cycle -- which is why
+-- measured intervals aliased to ~9 or ~12 and never 10.
+--
+-- The server sends GP_SERV_COMMAND_GROUP_ATTR (0x0DF) whenever HP or MP
+-- changes. LSB's healing effect calls addHPLeaveSleeping and addMP on every
+-- tick, and each sets UPDATE_HP, which is what gates this packet
+-- (char_entity.cpp:1202). Timestamping its arrival removes the polling error
+-- entirely.
+--
+-- HandlePacket is called from XIUI.lua's packet_in handler. If it never fires
+-- -- wrong packet id on a private server, say -- the polling path below still
+-- works, just with the old jitter, so this is an accuracy upgrade rather than
+-- a dependency.
+
+-- Previous HP/MP seen in a 0x0DF, for detecting a genuine rise.
+local last_hp = nil;
+local last_mp = nil;
+
+-- The local player's server id, for matching 0x0DF's UniqueNo field.
+local function get_player_server_id()
+    local ok, id = pcall(function()
+        local party = AshitaCore:GetMemoryManager():GetParty();
+        if party == nil then return nil; end
+        return party:GetMemberServerId(0);
+    end);
+    if not ok then return nil; end
+    return id;
+end
+
+function M.HandlePacket(e)
+    if e == nil or e.id ~= 0x0DF then return; end
+    if not is_resting() then
+        -- Drop the baselines: HP/MP will move freely outside resting, and a
+        -- stale pair would make the first packet of the next rest look like a
+        -- huge gain.
+        last_hp = nil;
+        last_mp = nil;
+        return;
+    end
+
+    -- 0x0DF layout, from LSB src/map/packets/s2c/0x0df_group_attr.h:
+    --
+    --   GP_SERV_HEADER (base.h): id:9 + size:7 = 2 bytes, sync = 2 bytes
+    --   ------------------------------------------------ 4 byte header
+    --   0x04  uint32 UniqueNo
+    --   0x08  uint32 Hp
+    --   0x0C  uint32 Mp
+    --   0x10  uint32 Tp
+    --
+    -- We do NOT care what the values are -- only that the server sent this
+    -- while we were resting. LSB only sets UPDATE_HP (which gates this packet)
+    -- when something actually moved:
+    --
+    --   addMP:  if (mp != 0) updatemask |= UPDATE_HP;
+    --
+    -- so a no-op change sends nothing, and arrival alone means a tick landed.
+    --
+    -- LIMITATION: with both HP and MP capped, nothing moves and no packet
+    -- arrives, so the countdown cannot sync and stays on its estimate. TP does
+    -- NOT rescue this -- healing.lua only calls addTP in its non-Signet branch,
+    -- so under Signet on continent 1 there is no TP drain either. That case is
+    -- accepted rather than worked around: with nothing visibly changing there
+    -- is no observable tick for the readout to be wrong about.
+    --
+    -- UniqueNo confirms the packet is ours: 0x0DF is also sent for TRUST party
+    -- members (second constructor taking CTrustEntity) and to the whole
+    -- alliance via the ForAlliance push, so without this a trust being healed
+    -- would register as our tick.
+    --
+    -- Hp and Mp are read because packet ARRIVAL alone is not a tick. 0x0DF is
+    -- gated on UPDATE_HP, and plenty of things set that mask without any rest
+    -- gain -- battle_entity.cpp:285 (UpdateHealth, which fires on gear swaps,
+    -- food, buffs and status changes), OnEngage/disengage at 4025/3635, plus
+    -- assorted lua_base_entity setters. Those arrive at arbitrary times and
+    -- would reset the display for no visible reason.
+    --
+    -- struct.unpack is 1-based, hence the +1.
+    local ok, uniqueNo, hp, mp = pcall(function()
+        return struct.unpack('I4', e.data, 0x04 + 1),
+               struct.unpack('I4', e.data, 0x08 + 1),
+               struct.unpack('I4', e.data, 0x0C + 1);
+    end);
+    if not ok or uniqueNo == nil or hp == nil or mp == nil then return; end
+
+    local myId = get_player_server_id();
+    if myId == nil or uniqueNo ~= myId then return; end
+
+    -- Require an actual RISE in HP or MP. A rest tick always raises at least
+    -- one of them (unless both are capped, in which case no packet is sent at
+    -- all and we stay on the estimate).
+    local rose = false;
+    if last_hp ~= nil and last_mp ~= nil then
+        rose = (hp > last_hp) or (mp > last_mp);
+    end
+    last_hp = hp;
+    last_mp = mp;
+    if not rose then return; end
+
+    local t = now_sec();
+
+    -- Plausibility gate. Even from the packet, a gain has to land where a tick
+    -- is possible -- a cure or an item would otherwise anchor the cycle to the
+    -- wrong instant for the whole rest.
+    if not synced then
+        local since_rest = t - rest_start_ts;
+        if since_rest < FIRST_MIN or since_rest > FIRST_MAX then return; end
+
+        anchor_ts = t;      -- phase anchor, set ONCE
+        synced    = true;
+    else
+        -- Judge against the ANCHOR GRID, not the last accepted packet.
+        --
+        -- Measuring from tick_seen_ts is self-poisoning: any stray packet that
+        -- happens to land near the window gets accepted as a tick, and the
+        -- REAL tick a second later then reads as ~1s since the last one and is
+        -- rejected. From that point nothing is ever accepted again and the
+        -- display stops resetting -- which is exactly the "first sync fine,
+        -- updates dead" symptom.
+        --
+        -- The anchor is a stable 10s grid, so distance from the nearest grid
+        -- point is a reference a bad packet cannot corrupt.
+        local into_cycle = (t - anchor_ts) % REST_CYCLE_SEC;
+        local off_grid   = math.min(into_cycle, REST_CYCLE_SEC - into_cycle);
+        if off_grid > CYCLE_TOL then
+            return;
+        end
+
+        -- The anchor is NOT moved to this packet.
+        --
+        -- Packet arrival still varies 9-11s -- server scheduling granularity
+        -- plus network latency -- so re-anchoring on each one would fold that
+        -- jitter into the base and the countdown would wander despite the true
+        -- cycle being a clean 10s. Correct the anchor only by WHOLE cycles, so
+        -- it stays phase-locked without absorbing per-packet noise.
+        --
+        -- Threshold is one full cycle, not 1.5: at 1.5 the anchor only caught
+        -- up after falling 15s behind, so it sat a whole tick in arrears and
+        -- the countdown read a cycle late. At 1.0 it tracks the grid within
+        -- the jitter (verified: 0.35s off after eight ticks vs 10.35s).
+        while (t - anchor_ts) >= REST_CYCLE_SEC do
+            anchor_ts = anchor_ts + REST_CYCLE_SEC;
+        end
+    end
+
+    -- Visual reset point. This is what makes the counter and shimmer restart
+    -- exactly when the gain lands, while the schedule above stays on 10s.
+    tick_seen_ts = t;
+end
+
+-- Track resting and return seconds until the next HP/MP tick (nil when not
+-- resting). Called once per frame from DrawWindow.
+--
+-- The schedule is anchored to an OBSERVED tick, then run as pure arithmetic:
+--   anchor + n * 10s
+-- The anchor is set once and afterwards corrected only by whole cycles. Every
+-- detection carries up to ~2s of sampling error (the frame poll beats against
+-- the server's 10s tick, so measured intervals alias to ~9 or ~12, never 10),
+-- so re-anchoring on each tick would fold that error into the base and the
+-- countdown would wobble forever despite the true rate being a clean 9.98s.
+--
+-- Detection still snaps the DISPLAY so the readout visibly restarts when MP
+-- lands, but it never moves the underlying schedule.
 local function update_rest_state()
     if not is_resting() then
         was_resting = false;
+        synced      = false;
+        last_hp     = nil;
+        last_mp     = nil;
         return nil;
     end
 
     local t = now_sec();
     if not was_resting then
         rest_start_ts = t;
-        was_resting = true;
+        was_resting   = true;
+        synced        = false;
+        anchor_ts     = 0.0;
+        tick_seen_ts  = 0.0;
+
+        -- Choose which stat to watch, once, at the start of this rest. Both
+        -- are sampled so the baseline is correct whichever gets picked.
+    end
+
+    -- Tick detection lives entirely in M.HandlePacket (0x0DF). There is no
+    -- polling fallback: the server sends that packet on every HP/MP change, so
+    -- if it isn't arriving the countdown should stay on its estimate rather
+    -- than silently reverting to a less accurate method that looks like it
+    -- works.
+
+    if synced then
+        -- Count down from the last OBSERVED tick, not from the anchor grid.
+        --
+        -- The anchor wraps every 10s, so basing the display on it would jump
+        -- back to 12 at t=10 -- exactly during the window where a late packet
+        -- is still expected. Counting from tick_seen_ts lets the number keep
+        -- falling through that window and only reset when a packet actually
+        -- lands. The anchor is still the schedule; this is presentation.
+        local since_seen = t - tick_seen_ts;
+        local remaining;
+        if tick_seen_ts > 0 then
+            remaining = REST_DISPLAY_SPAN_SEC - since_seen;
+        else
+            remaining = REST_DISPLAY_SPAN_SEC - ((t - anchor_ts) % REST_CYCLE_SEC);
+        end
+
+        -- Hold at 0 rather than going negative if a packet is later than the
+        -- span. It resets the moment one arrives.
+        if remaining < 0 then remaining = 0; end
+
+        return remaining;
     end
 
     local elapsed = t - rest_start_ts;
-    if elapsed < REST_FIRST_TICK_SEC then
-        return REST_FIRST_TICK_SEC - elapsed;
+
+    -- Not synced yet: run the nominal schedule off the estimate.
+    --
+    -- Usually this lasts only the few seconds before the first packet lands.
+    -- It persists for the whole rest in one case -- HP and MP both capped, so
+    -- nothing moves and no packet is ever sent -- and cycling is the right
+    -- behaviour there rather than sitting at 0: there is no observable tick to
+    -- contradict it, and a frozen readout looks broken.
+    if elapsed >= REST_FIRST_TICK_SEC then
+        -- Unsynced means no packets are arriving (both HP and MP capped), so
+        -- nothing will ever reset the display. Cycle on the TRUE 10s here
+        -- rather than the 12s display span: the span exists to leave room for
+        -- a late packet, and without packets that room would just make the
+        -- number jump 12 -> 2 -> 12 and never count down properly.
+        local into_cycle = (elapsed - REST_FIRST_TICK_SEC) % REST_CYCLE_SEC;
+        return REST_CYCLE_SEC - into_cycle;
+    end
+    return REST_FIRST_TICK_SEC - elapsed;
+end
+
+-- Progress 0..1 through the current tick interval, or nil when not resting.
+-- Exposed so the player-bar shimmer sweeps in lockstep with this countdown
+-- instead of keeping a second, unsynced copy of the timing.
+function M.GetRestTickProgress()
+    if not is_resting() then return nil; end
+    local t = now_sec();
+
+    if synced then
+        -- Measured from the last OBSERVED tick, same as the countdown, so the
+        -- wave keeps travelling through the late window instead of wrapping
+        -- when the anchor grid rolls over at 10s.
+        local into_cycle;
+        local since_seen = t - tick_seen_ts;
+        if tick_seen_ts > 0 then
+            into_cycle = since_seen;
+        else
+            into_cycle = (t - anchor_ts) % REST_CYCLE_SEC;
+        end
+
+        -- Normalised over the 12s span, clamped so the wave parks at the end
+        -- of the bar instead of wrapping if a packet is unusually late.
+        local progress = into_cycle / REST_DISPLAY_SPAN_SEC;
+        if progress > 1.0 then progress = 1.0; end
+        return progress;
     end
 
-    local into_cycle = (elapsed - REST_FIRST_TICK_SEC) % REST_CYCLE_SEC;
-    return REST_CYCLE_SEC - into_cycle;
+    local elapsed = t - rest_start_ts;
+
+    -- Mirrors the countdown above: cycle on the estimate rather than pinning
+    -- at 1.0, so the shimmer keeps sweeping when nothing can move. Unsynced
+    -- means no packets are coming, so the sweep uses the true cycle -- there
+    -- is no late arrival to leave room for.
+    if elapsed >= REST_FIRST_TICK_SEC then
+        -- True 10s here too, matching the countdown -- see the note there.
+        return ((elapsed - REST_FIRST_TICK_SEC) % REST_CYCLE_SEC) / REST_CYCLE_SEC;
+    end
+    return elapsed / REST_FIRST_TICK_SEC;
 end
 
 -- Normalize a raw log line: strip control/color/auto-translate bytes and
@@ -278,6 +567,11 @@ function M.Reset()
     def_round_seq   = 0;
     rest_start_ts   = 0.0;
     was_resting     = false;
+    anchor_ts       = 0.0;
+    tick_seen_ts    = 0.0;
+    synced          = false;
+    last_hp         = nil;
+    last_mp         = nil;
 end
 
 function M.DrawWindow(settings)

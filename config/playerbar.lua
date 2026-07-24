@@ -22,7 +22,7 @@ function M.DrawSettings()
         components.DrawCheckbox('TP Bar Flash Effects', 'playerBarTpFlashEnabled');
         imgui.ShowHelp('Flash effect when TP reaches 1000 or higher.');
         components.DrawCheckbox('Resting Tick Shimmer', 'playerBarRestingTicker');
-        imgui.ShowHelp('Sweeping shimmer across the HP bar while resting, timed to the HP/MP tick (first heal at 20s, then every 10s). The numeric countdown is in the Combat Timers window.');
+        imgui.ShowHelp('Sweeping shimmer across the HP bar while resting, timed to the HP/MP tick (resets on each tick packet). The sweep runs over 12s rather than the true 10s so it does not restart while a late packet is still pending. The numeric countdown is in the Combat Timers window.');
     end
 
     if components.CollapsingSection('Scale & Position##playerBar') then

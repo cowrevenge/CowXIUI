@@ -1155,6 +1155,14 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         petBar.HandlePacket(e);
     end
 
+    -- Rest tick detection (0x0DF Group Attr). The server sends this whenever
+    -- HP/MP/TP change, so a resting tick always produces one -- timestamping
+    -- its arrival is far more accurate than polling for the change on the next
+    -- frame.
+    if e.id == 0x0DF and bovinecombat ~= nil and bovinecombat.HandlePacket then
+        bovinecombat.HandlePacket(e);
+    end
+
     -- Hotbar pet palette sync (0x0068 Pet Sync) - rebinds pet-aware bars/combos.
     if e.id == 0x0068 and gConfig.hotbarEnabled then
         hotbar.HandlePetSyncPacket();
