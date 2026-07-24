@@ -125,7 +125,7 @@ local function serialize(value, indent)
         return type(a) == 'number';
     end);
 
-    local parts = { '{\r\n' };
+    local parts = { '{\n' };
     local inner = indent .. '    ';
     for _, k in ipairs(keys) do
         local keyStr;
@@ -134,7 +134,7 @@ local function serialize(value, indent)
         else
             keyStr = string.format('[%q]', k);
         end
-        table.insert(parts, string.format('%s%s = %s,\r\n',
+        table.insert(parts, string.format('%s%s = %s,\n',
             inner, keyStr, serialize(value[k], inner)));
     end
     table.insert(parts, indent .. '}');
@@ -151,18 +151,26 @@ local function savePreset(w, h)
     pcall(ashita.fs.create_directory, presetDir());
 
     local path = presetPath(w, h);
-    local f = io.open(path, 'w');
+    -- Binary mode, and plain \n line endings.
+    --
+    -- Text mode ('w') on Windows translates \n on write. Combined with the
+    -- explicit \r\n this used to emit, every line came out mangled (\r\r),
+    -- which meant a saved preset never matched the repo copy byte-for-byte and
+    -- the updater flagged it as changed on every single check.
+    --
+    -- Writing LF in binary mode produces exactly what git stores, so a preset
+    -- saved in-game is byte-identical to one pulled from the repo.
+    local f = io.open(path, 'wb');
     if f == nil then
         setStatus('Could not write ' .. path, true);
         return;
     end
 
-    f:write('-- XIUI preset\r\n');
-    f:write(string.format('-- resolution: %dx%d\r\n', w, h));
-    f:write(string.format('-- saved: %s\r\n\r\n', os.date('%Y-%m-%d %H:%M:%S')));
+    f:write('-- XIUI preset\n');
+    f:write(string.format('-- resolution: %dx%d\n\n', w, h));
     f:write('return ');
     f:write(serialize(gConfig, ''));
-    f:write('\r\n');
+    f:write('\n');
     f:close();
 
     -- Count saved window positions for the status message.
