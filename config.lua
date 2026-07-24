@@ -26,6 +26,7 @@ local treasurepoolModule = require('config.treasurepool');
 local bovinelatentModule = require('config.bovinelatent');
 local bovinededicationModule = require('config.bovinededication');
 local bovinecombatModule = require('config.bovinecombat');
+local presetModule = require('config.preset');
 local hidepartyModule = require('config.hideparty');
 local hotbarModule = require('config.hotbar');
 
@@ -120,23 +121,24 @@ local selectedHotbarColorCrossbarTab = 1;
 -- Category definitions
 local categories = {
     { name = 'global', label = 'Global' },
-    { name = 'playerBar', label = 'Player Bar' },
-    { name = 'targetBar', label = 'Target Bar' },
-    { name = 'enemyList', label = 'Enemy List' },
-    { name = 'partyList', label = 'Party List' },
-    { name = 'expBar', label = 'Exp Bar' },
-    { name = 'gilTracker', label = 'Gil Tracker' },
-    { name = 'inventory', label = 'Inventory' },
     { name = 'castBar', label = 'Cast Bar' },
     { name = 'castCost', label = 'Cast Cost' },
-    { name = 'petBar', label = 'Pet Bar' },
-    { name = 'hotbar', label = 'Hotbar' },
-    { name = 'notifications', label = 'Notifications' },
-    { name = 'hideparty', label = 'Hideparty' },
-    { name = 'treasurePool', label = 'Treasure Pool' },
-    { name = 'bovinelatent', label = 'Latent Trial' },
-    { name = 'bovinededication', label = 'Dedication' },
     { name = 'bovinecombat', label = 'Combat Timers' },
+    { name = 'bovinededication', label = 'Dedication' },
+    { name = 'enemyList', label = 'Enemy List' },
+    { name = 'expBar', label = 'Exp Bar' },
+    { name = 'gilTracker', label = 'Gil Tracker' },
+    { name = 'hideparty', label = 'Hideparty' },
+    { name = 'hotbar', label = 'Hotbar' },
+    { name = 'inventory', label = 'Inventory' },
+    { name = 'bovinelatent', label = 'Latent Trial' },
+    { name = 'notifications', label = 'Notifications' },
+    { name = 'partyList', label = 'Party List' },
+    { name = 'petBar', label = 'Pet Bar' },
+    { name = 'playerBar', label = 'Player Bar' },
+    { name = 'preset', label = 'Preset' },
+    { name = 'targetBar', label = 'Target Bar' },
+    { name = 'treasurePool', label = 'Treasure Pool' },
 };
 
 -- Build state object for modules that need tab state
@@ -363,47 +365,57 @@ local function DrawBovinecombatColorSettings()
     bovinecombatModule.DrawColorSettings();
 end
 
+local function DrawPresetSettings()
+    presetModule.DrawSettings();
+end
+
+local function DrawPresetColorSettings()
+    presetModule.DrawColorSettings();
+end
+
 -- Dispatch tables for settings and color settings
 local settingsDrawFunctions = {
     DrawGlobalSettings,
-    DrawPlayerBarSettings,
-    DrawTargetBarSettings,
-    DrawEnemyListSettings,
-    DrawPartyListSettings,
-    DrawExpBarSettings,
-    DrawGilTrackerSettings,
-    DrawInventorySettings,
     DrawCastBarSettings,
     DrawCastCostSettings,
-    DrawPetBarSettings,
-    DrawHotbarSettings,
-    DrawNotificationsSettings,
-    DrawHidepartySettings,
-    DrawTreasurePoolSettings,
-    DrawBovinelatentSettings,
-    DrawBovinededicationSettings,
     DrawBovinecombatSettings,
+    DrawBovinededicationSettings,
+    DrawEnemyListSettings,
+    DrawExpBarSettings,
+    DrawGilTrackerSettings,
+    DrawHidepartySettings,
+    DrawHotbarSettings,
+    DrawInventorySettings,
+    DrawBovinelatentSettings,
+    DrawNotificationsSettings,
+    DrawPartyListSettings,
+    DrawPetBarSettings,
+    DrawPlayerBarSettings,
+    DrawPresetSettings,
+    DrawTargetBarSettings,
+    DrawTreasurePoolSettings,
 };
 
 local colorSettingsDrawFunctions = {
     DrawGlobalColorSettings,
-    DrawPlayerBarColorSettings,
-    DrawTargetBarColorSettings,
-    DrawEnemyListColorSettings,
-    DrawPartyListColorSettings,
-    DrawExpBarColorSettings,
-    DrawGilTrackerColorSettings,
-    DrawInventoryColorSettings,
     DrawCastBarColorSettings,
     DrawCastCostColorSettings,
-    DrawPetBarColorSettings,
-    DrawHotbarColorSettings,
-    DrawNotificationsColorSettings,
-    DrawHidepartyColorSettings,
-    DrawTreasurePoolColorSettings,
-    DrawBovinelatentColorSettings,
-    DrawBovinededicationColorSettings,
     DrawBovinecombatColorSettings,
+    DrawBovinededicationColorSettings,
+    DrawEnemyListColorSettings,
+    DrawExpBarColorSettings,
+    DrawGilTrackerColorSettings,
+    DrawHidepartyColorSettings,
+    DrawHotbarColorSettings,
+    DrawInventoryColorSettings,
+    DrawBovinelatentColorSettings,
+    DrawNotificationsColorSettings,
+    DrawPartyListColorSettings,
+    DrawPetBarColorSettings,
+    DrawPlayerBarColorSettings,
+    DrawPresetColorSettings,
+    DrawTargetBarColorSettings,
+    DrawTreasurePoolColorSettings,
 };
 
 config.DrawWindow = function(us)

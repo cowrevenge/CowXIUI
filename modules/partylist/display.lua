@@ -494,6 +494,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     local barScales   = data.getBarScales(partyIndex);
     local layoutTpl   = data.getLayoutTemplate(partyIndex);
     local fontSizes   = data.getFontSizes(partyIndex);
+    local textOffsets = data.getTextOffsets(partyIndex);
     local _, hpGradient = GetCustomHpColors(memInfo.hpp, cache.colors);
 
     -- Baseline text size for this layout. Individual elements override it as
@@ -718,7 +719,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 fullLine = fullLine .. ' (' .. zoneShort .. ')';
             end
             setTextSize(fontSizes.name);
-            drawOutlinedText(nameStartX, entryTop, fullLine, {1, 1, 1, 1});
+            drawOutlinedText(nameStartX + textOffsets.nameX, entryTop + textOffsets.nameY, fullLine, {1, 1, 1, 1});
         end
 
         imgui.SetCursorScreenPos({hpStartX, entryTop + entryHeight});
@@ -797,10 +798,10 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         if showMpBar then
             local mpY = mpRowY + (mpBarHeight - mpRowTextH) / 2;
             if mpSplit then
-                drawOutlinedText(mpValX,  mpY, mpValStr,  {1, 1, 1, 1});
-                drawOutlinedText(mpSuffX, mpY, mpSuffStr, {1, 1, 1, 1});
+                drawOutlinedText(mpValX + textOffsets.mpX,  mpY + textOffsets.mpY, mpValStr,  {1, 1, 1, 1});
+                drawOutlinedText(mpSuffX + textOffsets.mpX, mpY + textOffsets.mpY, mpSuffStr, {1, 1, 1, 1});
             else
-                drawOutlinedText(mpValX, mpY, mpText, {1, 1, 1, 1});
+                drawOutlinedText(mpValX + textOffsets.mpX, mpY + textOffsets.mpY, mpText, {1, 1, 1, 1});
             end
         end
 
@@ -836,12 +837,12 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 local suffX = hpStartX + entryWidth - suffW + SC_VALUE_BOTH_OFFSET;
                 local valX  = suffX - 2 - valW;
                 setTextSize(fontSizes.hp);
-                drawOutlinedText(valX,  entryTop, valStr,  hpColor);
-                drawOutlinedText(suffX, entryTop, suffStr, hpColor);
+                drawOutlinedText(valX + textOffsets.hpX,  entryTop + textOffsets.hpY, valStr,  hpColor);
+                drawOutlinedText(suffX + textOffsets.hpX, entryTop + textOffsets.hpY, suffStr, hpColor);
             else
                 local hpText = formatBarValueText(memInfo.hp, memInfo.maxhp, hpPercent, hpMode);
                 local hpW = measureText(hpText);
-                drawOutlinedText(hpStartX + entryWidth - hpW + SC_VALUE_NUM_OFFSET, entryTop, hpText, hpColor);
+                drawOutlinedText(hpStartX + entryWidth - hpW + SC_VALUE_NUM_OFFSET + textOffsets.hpX, entryTop + textOffsets.hpY, hpText, hpColor);
             end
 
             -- Leader / Alliance / Sync dots BEFORE the name so the name (added
@@ -856,7 +857,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 nameStr = nameStr:sub(1, 8) .. '..';
             end
             setTextSize(fontSizes.name);
-            drawOutlinedText(nameStartX, entryTop, nameStr, hpColor);
+            drawOutlinedText(nameStartX + textOffsets.nameX, entryTop + textOffsets.nameY, nameStr, hpColor);
         end
 
         -- (7) TP — drawn LAST so it sits on top of everything. Right-aligned 2 px
@@ -878,7 +879,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 tpColor = {1, 1, 1, 1};          -- white at 1000+ without flash
             end
             local tpAnchor = (showMpBar and math.min(mpBarStartX, mpValueLeftX)) or mpBarStartX;
-            drawOutlinedText(tpAnchor - tpW - 2, mpRowY + (mpBarHeight - mpRowTextH) / 2, tpText, tpColor, fontSizes.tp);
+            drawOutlinedText(tpAnchor - tpW - 2 + textOffsets.tpX, mpRowY + (mpBarHeight - mpRowTextH) / 2 + textOffsets.tpY, tpText, tpColor, fontSizes.tp);
         end
 
         -- Advance imgui cursor past the entry block so the next member draws below.
@@ -1538,7 +1539,16 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             local hpW, hpH2 = measureText(hpDisplayText);
             local hpOvX = hpDrawX + hpBarWidth - hpW - 4;
             local hpOvY = hpStartY + (hpBarHeight - hpH2) / 2;
-            drawOutlinedText(hpOvX, hpOvY, hpDisplayText, {1, 1, 1, 1}, fontSizes.hp);
+            -- TEMP DEBUG: /xiui debug partyoffset
+            if _XIUI_DEBUG_PARTYOFFSET and memIdx == 0 and not _XIUI_DEBUG_PARTYOFFSET_DONE then
+                _XIUI_DEBUG_PARTYOFFSET_DONE = true;
+                print(string.format(
+                    '[XIUI] L%d hp base=(%.1f,%.1f) off=(%s,%s) final=(%.1f,%.1f)',
+                    layout, hpOvX, hpOvY,
+                    tostring(textOffsets.hpX), tostring(textOffsets.hpY),
+                    hpOvX + textOffsets.hpX, hpOvY + textOffsets.hpY));
+            end
+            drawOutlinedText(hpOvX + textOffsets.hpX, hpOvY + textOffsets.hpY, hpDisplayText, {1, 1, 1, 1}, fontSizes.hp);
         end
         data.memberText[memIdx].zone:set_visible(false);
     elseif (memInfo.zone == '' or memInfo.zone == nil) then
@@ -2047,7 +2057,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     -- below the showMpBar block so no-MP jobs still show TP.
                     do
                         local mpW, mpH2 = measureText(mpDisplayText, fontSizes.mp);
-                        drawOutlinedText(mpStartX + mpBarWidth - mpW - 4, mpStartY + (mpBarHeight - mpH2) / 2, mpDisplayText, {1, 1, 1, 1}, fontSizes.mp);
+                        drawOutlinedText(mpStartX + mpBarWidth - mpW - 4 + textOffsets.mpX, mpStartY + (mpBarHeight - mpH2) / 2 + textOffsets.mpY, mpDisplayText, {1, 1, 1, 1}, fontSizes.mp);
                     end
                     if (data.memberTextColorCache[memIdx].mp ~= cache.colors.mpTextColor) then
                         data.memberText[memIdx].mp:set_font_color(cache.colors.mpTextColor);
@@ -2079,7 +2089,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 end
                 -- TP value sits in the empty gap to the LEFT of the (narrower,
                 -- right-aligned) MP bar, right-aligned against the bar's left edge.
-                drawOutlinedText(mpStartX - tpW - 4, mpStartY + (mpBarHeight - tpH2) / 2, tpStr, tpColor, fontSizes.tp);
+                drawOutlinedText(mpStartX - tpW - 4 + textOffsets.tpX, mpStartY + (mpBarHeight - tpH2) / 2 + textOffsets.tpY, tpStr, tpColor, fontSizes.tp);
             end
         else
             -- Layout 0: Horizontal layout

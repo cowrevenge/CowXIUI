@@ -586,7 +586,10 @@ function M.DrawWindow(settings)
     -- trying so detection comes online without a reload.
     ensure_player_name_cached();
 
-    imgui.SetNextWindowSize({ 200, 0 }, ImGuiCond_FirstUseEver);
+    -- No SetNextWindowSize: AlwaysAutoResize below sizes the window to its
+    -- contents every frame. The layout is three label/value rows whose widths
+    -- come entirely from the font, so a fixed or user-set size would only ever
+    -- be wrong -- too narrow and it clips, too wide and it wastes screen.
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0);
     imgui.PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0);
     imgui.PushStyleColor(ImGuiCol_WindowBg, { 0.08, 0.08, 0.10, 0.92 });
@@ -614,32 +617,51 @@ function M.DrawWindow(settings)
         end
     end
 
-    local drew = imgui.Begin('Combat Timers##bovinecombat', win_open, ImGuiWindowFlags_NoCollapse);
+    local drew = imgui.Begin('Combat Timers##bovinecombat', win_open,
+        bit.bor(ImGuiWindowFlags_NoCollapse,
+                ImGuiWindowFlags_AlwaysAutoResize,
+                ImGuiWindowFlags_NoResize));
     if not win_open[1] and cfg then
         cfg.bovinecombatHidden = true;
     end
     if drew then
         local engaged = is_engaged();
 
-        imgui.Text('Since Attack:');
-        imgui.SameLine(110);
-        if engaged then
-            imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 1.0, 0.65, 1.0 });
-        else
-            imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 0.55, 0.60, 1.0 });
+        -- Column position for the values.
+        --
+        -- Was a hardcoded 110px, which broke once the font became
+        -- configurable: 'Since Defence:' is the longest label and at a larger
+        -- size or wider face it overruns 110, so its value shifted right while
+        -- the other two stayed put. Measuring the widest label keeps the
+        -- column aligned at any font or size.
+        local valueColX = imgui.CalcTextSize('Since Defence:') + 12;
+
+        -- Reserve the width of the widest value the window will ever show.
+        --
+        -- With AlwaysAutoResize the window hugs its contents, so a row reading
+        -- '--' is far narrower than one reading '123.4s' -- the window would
+        -- visibly snap between two widths as timers start and stop. Drawing an
+        -- invisible placeholder at the widest value pins the width so it stays
+        -- put, with a small margin so the text never touches the edge.
+        local valueW = imgui.CalcTextSize('123.4s') + 8;
+        local function drawValue(text, color)
+            imgui.PushStyleColor(ImGuiCol_Text, color);
+            imgui.Text(text);
+            imgui.PopStyleColor();
+            -- Invisible spacer holding the reserved width.
+            imgui.SameLine(valueColX + valueW);
+            imgui.Text(' ');
         end
-        imgui.Text(format_elapsed(last_attack_ts));
-        imgui.PopStyleColor();
+
+        imgui.Text('Since Attack:');
+        imgui.SameLine(valueColX);
+        drawValue(format_elapsed(last_attack_ts),
+            engaged and { 0.55, 1.0, 0.65, 1.0 } or { 0.55, 0.55, 0.60, 1.0 });
 
         imgui.Text('Since Defence:');
-        imgui.SameLine(110);
-        if engaged then
-            imgui.PushStyleColor(ImGuiCol_Text, { 1.0, 0.7, 0.55, 1.0 });
-        else
-            imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 0.55, 0.60, 1.0 });
-        end
-        imgui.Text(format_elapsed(last_defence_ts));
-        imgui.PopStyleColor();
+        imgui.SameLine(valueColX);
+        drawValue(format_elapsed(last_defence_ts),
+            engaged and { 1.0, 0.7, 0.55, 1.0 } or { 0.55, 0.55, 0.60, 1.0 });
 
         -- Resting tick countdown. Only counts while resting (Status 33);
         -- shows '--' otherwise. Toggleable from the Combat Timers config.
@@ -647,15 +669,12 @@ function M.DrawWindow(settings)
             local secs_to_tick = update_rest_state();
 
             imgui.Text('Next Tick:');
-            imgui.SameLine(110);
+            imgui.SameLine(valueColX);
             if secs_to_tick then
-                imgui.PushStyleColor(ImGuiCol_Text, { 0.35, 0.85, 1.0, 1.0 });
-                imgui.Text(string.format('%.1fs', secs_to_tick));
+                drawValue(string.format('%.1fs', secs_to_tick), { 0.35, 0.85, 1.0, 1.0 });
             else
-                imgui.PushStyleColor(ImGuiCol_Text, { 0.55, 0.55, 0.60, 1.0 });
-                imgui.Text('--');
+                drawValue('--', { 0.55, 0.55, 0.60, 1.0 });
             end
-            imgui.PopStyleColor();
         else
             -- Keep edge tracking correct even while the row is hidden.
             update_rest_state();

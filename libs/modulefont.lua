@@ -39,6 +39,12 @@ function M.Apply(overrideEnabled, family, weight, outlineWidth, fallback)
     if overrideEnabled then
         imtext.SetConfig(family or 'Default', weight == 'Bold', outlineWidth or 2);
     elseif fallback ~= nil then
+        -- Not overriding: follow the global font settings.
+        --
+        -- Note this means an unticked Override Font box gives you Global's
+        -- family, NOT 'Default' -- the family stored against this module is
+        -- only consulted when the override is on. If you want the built-in
+        -- bitmap font you have to tick the box and select it.
         imtext.SetConfigFromSettings(fallback);
     end
 end
@@ -54,7 +60,7 @@ end
 --- @param text      string
 --- @param rgba      table   {r,g,b,a} floats 0-1
 --- @param size      number|nil  font height; nil uses imtext's default
-function M.DrawText(drawList, x, y, text, rgba, size)
+function M.DrawText(drawList, x, y, text, rgba, size, style)
     if drawList == nil or text == nil or text == '' then return; end
     local c = rgba or { 1, 1, 1, 1 };
     local argb = bit.bor(
@@ -62,7 +68,19 @@ function M.DrawText(drawList, x, y, text, rgba, size)
         bit.lshift(math.floor(c[1] * 255), 16),
         bit.lshift(math.floor(c[2] * 255), 8),
         math.floor(c[3] * 255));
-    imtext.Draw(drawList, tostring(text), x, y, argb, size);
+
+    -- 'shadow' draws a single offset shadow; anything else draws a 4-direction
+    -- outline.
+    --
+    -- This matters more than it looks. Modules that previously drew one black
+    -- copy at +1/+1 (a drop shadow) get visibly heavier if converted to the
+    -- outline: four passes at width 2 thicken every glyph and the text stops
+    -- looking crisp. Callers that had a shadow should keep asking for one.
+    if style == 'shadow' then
+        imtext.DrawShadow(drawList, tostring(text), x, y, argb, size);
+    else
+        imtext.Draw(drawList, tostring(text), x, y, argb, size);
+    end
 end
 
 --- Measure at the size the text will actually be drawn at.

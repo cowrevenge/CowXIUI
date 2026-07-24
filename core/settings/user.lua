@@ -288,7 +288,7 @@ function M.createUserSettingsDefaults()
         enemyListOverrideFont = false,
         enemyListFontFamily = 'Default',
         enemyListFontWeight = 'Normal',
-        enemyListFontOutlineWidth = 2,
+        enemyListFontOutlineWidth = 1,
         enemyListNameFontSize = 10,
         enemyListDistanceFontSize = 8,
         enemyListPercentFontSize = 8,

@@ -1065,6 +1065,10 @@ ashita.events.register('command', 'command_cb', function (e)
                 DEBUG_RAW_INPUT = not DEBUG_RAW_INPUT;
                 print('[XIUI] Raw input debug: ' .. (DEBUG_RAW_INPUT and 'ON' or 'OFF'));
                 print('[XIUI] Logs ALL xinput/dinput events before hotbar processing.');
+            elseif moduleName == 'partyoffset' then
+                _XIUI_DEBUG_PARTYOFFSET = not _XIUI_DEBUG_PARTYOFFSET;
+                _XIUI_DEBUG_PARTYOFFSET_DONE = nil;
+                print('[XIUI] Party offset debug: ' .. (_XIUI_DEBUG_PARTYOFFSET and 'ON' or 'OFF'));
             elseif moduleName == 'palette' then
                 hotbar.SetPaletteDebugEnabled(not hotbar.IsPaletteDebugEnabled());
             else

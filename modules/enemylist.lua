@@ -57,8 +57,11 @@ local function setElSize(sz) elSize = sz; end
 -- Draw at the current element size. Takes an RGBA float table; the call sites
 -- here all use plain white, so a single shared constant covers them.
 local EL_WHITE = { 1, 1, 1, 1 };
+-- 'shadow' style: the original drew a single black copy at +1/+1, not a
+-- 4-direction outline. Using the outline here thickens every glyph and loses
+-- the crispness this list is meant to have.
 local function elText(dl, x, y, text, rgba, size)
-    modulefont.DrawText(dl, x, y, text, rgba or EL_WHITE, size or elSize);
+    modulefont.DrawText(dl, x, y, text, rgba or EL_WHITE, size or elSize, 'shadow');
 end
 
 -- Measure at the size the text will be drawn at.
@@ -129,11 +132,14 @@ enemylist.DrawWindow = function(settings)
 	-- imtext holds family/weight as module-level state shared with every other
 	-- caller -- without this the enemy list would inherit whatever the hotbar or
 	-- party list configured last.
+	-- Outline width defaults to 1 here, matching the original +1/+1 shadow
+	-- offset. The global default of 2 is tuned for the 4-direction outline the
+	-- other modules use and is too heavy for a single shadow.
 	modulefont.Apply(
 		gConfig.enemyListOverrideFont,
 		gConfig.enemyListFontFamily,
 		gConfig.enemyListFontWeight,
-		gConfig.enemyListFontOutlineWidth,
+		gConfig.enemyListFontOutlineWidth or 1,
 		settings and settings.name_font_settings);
 
 	-- Per-element sizes, from the existing Text Size sliders. These were
