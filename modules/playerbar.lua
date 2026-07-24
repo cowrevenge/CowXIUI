@@ -5,6 +5,7 @@ local gdi = require('submodules.gdifonts.include');
 local progressbar = require('libs.progressbar');
 local buffTable = require('libs.bufftable');
 local castcostShared = require('modules.castcost.shared');
+local imtext = require('libs.imtext');
 
 -- Local imgui-based outlined text helper. Bars use imgui; gdifont primitives
 -- render BEFORE imgui in Ashita's pipeline and end up UNDER the bars - which
@@ -27,18 +28,34 @@ local function argbIntToRgba(c)
     return {r, g, b, a};
 end
 
+-- Font height for the player bar's HP/MP/TP text.
+--
+-- Comes from playerBarFontSize via core/settings/updater.lua, which writes it
+-- into playerBarSettings.font_settings.font_height. Set once per frame in
+-- DrawWindow so the helpers below don't each have to reach for settings.
+local playerBarFontHeight = nil;
+
+-- Text was previously drawn with imgui's AddText and no font argument, which
+-- pins it to imgui's default size -- so the Text Size slider and the global
+-- font family/outline settings had no effect at all.
+--
+-- imtext.Draw takes the size and applies the configured family, weight and
+-- outline width, matching how the party list and hotbar render their text.
 local function drawOutlinedText(x, y, text, fillColor)
     if text == nil or text == '' then return; end
     text = tostring(text);
     local dl = imgui.GetForegroundDrawList();
     if dl == nil then return; end
-    local blackU32 = imgui.GetColorU32({0, 0, 0, 1});
-    local fillU32  = imgui.GetColorU32(fillColor or {1, 1, 1, 1});
-    dl:AddText({x - 1, y - 1}, blackU32, text);
-    dl:AddText({x + 1, y - 1}, blackU32, text);
-    dl:AddText({x - 1, y + 1}, blackU32, text);
-    dl:AddText({x + 1, y + 1}, blackU32, text);
-    dl:AddText({x, y}, fillU32, text);
+
+    -- imtext wants an ARGB int; this file works in RGBA float tables.
+    local c = fillColor or {1, 1, 1, 1};
+    local argb = bit.bor(
+        bit.lshift(math.floor((c[4] or 1) * 255), 24),
+        bit.lshift(math.floor(c[1] * 255), 16),
+        bit.lshift(math.floor(c[2] * 255), 8),
+        math.floor(c[3] * 255));
+
+    imtext.Draw(dl, text, x, y, argb, playerBarFontHeight);
 end
 
 -- Given an alignment anchor X and the text width, return the imgui-friendly
@@ -108,6 +125,21 @@ if _XIUI_DEV_DEBUG_INTERPOLATION then
 end
 
 playerbar.DrawWindow = function(settings)
+    -- Font height for this frame's HP/MP/TP text. Sourced from
+    -- playerBarFontSize (core/settings/updater.lua writes it into
+    -- font_settings.font_height), so the Text Size slider and the global
+    -- font family / outline settings now actually apply.
+    playerBarFontHeight = settings and settings.font_settings
+        and settings.font_settings.font_height or nil;
+
+    -- imtext keeps its font family / weight / outline as MODULE-level state,
+    -- and the hotbar sets it from its own settings. Without re-applying ours
+    -- here the player bar would inherit whatever the hotbar last configured.
+    -- Cheap: SetConfigFromSettings early-outs when nothing changed.
+    if settings and settings.font_settings then
+        imtext.SetConfigFromSettings(settings.font_settings);
+    end
+
     -- Obtain game state (single call each, cached for this frame)
     local party = GetPartySafe();
     local player = GetPlayerSafe();
@@ -581,7 +613,7 @@ playerbar.DrawWindow = function(settings)
 		else
 			hpDisplayText = tostring(SelfHP);
 		end
-		local hpW, hpH = imgui.CalcTextSize(hpDisplayText);
+		local hpW, hpH = imtext.Measure(hpDisplayText, playerBarFontHeight);
 		local hpAnchorX;
 		local hpAlignment = gConfig.playerBarHpTextAlignment or 'right';
 		if hpAlignment == 'left' then
@@ -614,7 +646,7 @@ playerbar.DrawWindow = function(settings)
 			else
 				mpDisplayText = tostring(SelfMP);
 			end
-			local mpW, _ = imgui.CalcTextSize(mpDisplayText);
+			local mpW, _ = imtext.Measure(mpDisplayText, playerBarFontHeight);
 			local mpAnchorX;
 			local mpAlignment = gConfig.playerBarMpTextAlignment or 'right';
 			if mpAlignment == 'left' then
@@ -636,7 +668,7 @@ playerbar.DrawWindow = function(settings)
 
 		-- TP text (drawn via imgui above the bar).
 		local tpDisplayText = tostring(SelfTP);
-		local tpW, _ = imgui.CalcTextSize(tpDisplayText);
+		local tpW, _ = imtext.Measure(tpDisplayText, playerBarFontHeight);
 		local tpAnchorX;
 		local tpAlignment = gConfig.playerBarTpTextAlignment or 'right';
 		if tpAlignment == 'left' then

@@ -63,6 +63,16 @@ local function loadFont(fontFamily, isBold)
     local fontKey = (fontFamily or 'Tahoma') .. (isBold and ':bold' or ':regular');
     if fontKey == activeFontKey then return; end
 
+    -- 'Default' means imgui's built-in bitmap font: leave activeFont nil and
+    -- the draw path below falls through to AddText without a font argument,
+    -- which is exactly what the UI did before it used this library. Crisper
+    -- than the TTF families at small sizes, which go blurry when scaled.
+    if fontFamily == 'Default' then
+        activeFont    = nil;
+        activeFontKey = fontKey;
+        return;
+    end
+
     -- Check cache first (font already loaded in a previous call)
     local cached = fontCache[fontKey];
     if cached then
@@ -195,6 +205,16 @@ function M.Measure(text, fontSize)
                 return w * scale, fontSize;
             end
         end
+    end
+
+    -- No font loaded means the 'Default' family (imgui's built-in bitmap
+    -- font). Draw() renders that UNSCALED via bare AddText, so measuring with
+    -- a scale factor here would report a width the text never has and every
+    -- right-aligned value would land in the wrong place. Return the true
+    -- unscaled size to match what actually gets drawn.
+    if not activeFont then
+        local w, h = imgui.CalcTextSize(text);
+        return w, h;
     end
 
     local defaultHeight = getLineHeight();

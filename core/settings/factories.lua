@@ -67,6 +67,14 @@ function M.createPartyDefaults(overrides)
         distanceFontSize = 12,
         jobFontSize = 12,
         zoneFontSize = 10,
+        -- Font family / weight override. Off means follow Global Text
+        -- Settings; on lets this party pick its own, which is useful because
+        -- 'Default' (imgui's built-in bitmap font) stays crisp at small sizes
+        -- where the TTF families blur.
+        overrideFont = false,
+        fontFamily = 'Default',
+        fontWeight = 'Normal',
+        fontOutlineWidth = 2,
         -- Bar scales (for all layouts)
         hpBarScaleX = 1,
         mpBarScaleX = 1,

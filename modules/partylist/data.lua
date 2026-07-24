@@ -472,6 +472,18 @@ function data.updatePartyConfigCache()
             cache.fontSizes.zone = fontSize;
         end
 
+        -- Font family / weight override.
+        --
+        -- Off by default, in which case the party list follows the Global Text
+        -- Settings like everything else. When on, this party picks its own
+        -- family and weight -- useful because the TTF families blur at small
+        -- sizes while imgui's built-in 'Default' stays crisp, so you may want
+        -- Default here and a nicer face everywhere else.
+        cache.overrideFont = party.overrideFont == true;
+        cache.fontFamily   = party.fontFamily or 'Default';
+        cache.fontWeight   = party.fontWeight or 'Normal';
+        cache.outlineWidth = party.fontOutlineWidth or 2;
+
         -- BarScales
         if cache.barScales == nil then cache.barScales = {}; end
         cache.barScales.hpBarScaleX = party.hpBarScaleX or 1;

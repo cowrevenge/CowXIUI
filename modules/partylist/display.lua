@@ -11,6 +11,7 @@ local statusHandler = require('handlers.statushandler');
 local buffTable = require('libs.bufftable');
 local statusIcons = require('libs.statusicons');
 local progressbar = require('libs.progressbar');
+local imtext = require('libs.imtext');
 local windowBg = require('libs.windowbackground');
 local TextureManager = require('libs.texturemanager');
 local encoding = require('submodules.gdifonts.encoding');
@@ -100,20 +101,44 @@ end
 -- UNDER the bar. Drawing directly onto the foreground draw list guarantees the
 -- overlay text composites on top of the bars. The {r,g,b,a} 0-1 color table is
 -- converted to a U32 via imgui.GetColorU32. Cursor is left untouched.
-local function drawOutlinedText(x, y, text, fillColor)
+-- Font height used by the imgui text helpers below.
+--
+-- The compact layouts draw their text with imgui rather than gdifont
+-- primitives (gdi renders UNDER imgui, so the window background covers it).
+-- imgui's AddText with no font argument is locked to the default size, which
+-- meant the party list's Text Size sliders had no effect on those layouts --
+-- the sizes were being applied to gdifont objects that are hidden.
+--
+-- Set per element via setTextSize() as each is drawn, so Split Text Sizes
+-- works the same way it does for the gdifont path.
+local currentTextSize = nil;
+
+local function setTextSize(size)
+    currentTextSize = size;
+end
+
+local function drawOutlinedText(x, y, text, fillColor, size)
     if text == nil or text == '' then return; end
     text = tostring(text);
     local dl = imgui.GetForegroundDrawList();
     if dl == nil then return; end
-    local blackU32 = imgui.GetColorU32({0, 0, 0, 1});
-    local fillU32  = imgui.GetColorU32(fillColor or {1, 1, 1, 1});
-    -- 4-direction black outline
-    dl:AddText({x - 1, y - 1}, blackU32, text);
-    dl:AddText({x + 1, y - 1}, blackU32, text);
-    dl:AddText({x - 1, y + 1}, blackU32, text);
-    dl:AddText({x + 1, y + 1}, blackU32, text);
-    -- fill on top
-    dl:AddText({x, y}, fillU32, text);
+
+    -- imtext wants an ARGB int; this file works in RGBA float tables.
+    local c = fillColor or {1, 1, 1, 1};
+    local argb = bit.bor(
+        bit.lshift(math.floor((c[4] or 1) * 255), 24),
+        bit.lshift(math.floor(c[1] * 255), 16),
+        bit.lshift(math.floor(c[2] * 255), 8),
+        math.floor(c[3] * 255));
+
+    imtext.Draw(dl, text, x, y, argb, size or currentTextSize);
+end
+
+-- Measure at the size the text will actually be DRAWN at. Using
+-- imgui.CalcTextSize here would measure at the default size and every
+-- right-aligned or centred value would land in the wrong place.
+local function measureText(text, size)
+    return imtext.Measure(tostring(text or ''), size or currentTextSize);
 end
 
 -- Helper: shorten an FFXI zone name for the cramped partylist out-of-zone
@@ -468,7 +493,13 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     local scale       = data.getScale(partyIndex);
     local barScales   = data.getBarScales(partyIndex);
     local layoutTpl   = data.getLayoutTemplate(partyIndex);
+    local fontSizes   = data.getFontSizes(partyIndex);
     local _, hpGradient = GetCustomHpColors(memInfo.hpp, cache.colors);
+
+    -- Baseline text size for this layout. Individual elements override it as
+    -- they draw (see setTextSize calls below) so Split Text Sizes applies
+    -- here exactly as it does on the gdifont path.
+    setTextSize(fontSizes.name);
 
     -- Bar dimensions
     local baseHpW = (layoutTpl.hpBarWidth or 135) * PARTY_BAR_BASE_WIDTH_MULT;
@@ -503,7 +534,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
     -- hpStartX, then emit a right Dummy of cursorPaddingX2 after the entry.
     imgui.Indent(settings.cursorPaddingX1);
     local hpStartX, entryTop = imgui.GetCursorScreenPos();
-    local _, nameRowH = imgui.CalcTextSize('A');
+    local _, nameRowH = measureText('A');
     local hpStartY = entryTop + nameRowH - SC_NAME_BAR_OVERLAP;
     local entryHeight = (nameRowH - SC_NAME_BAR_OVERLAP) + hpBarHeight + mpBarHeight - LAYOUT_SUPERCOMPACT_OVERLAP;
 
@@ -686,6 +717,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
             if zoneShort ~= '' then
                 fullLine = fullLine .. ' (' .. zoneShort .. ')';
             end
+            setTextSize(fontSizes.name);
             drawOutlinedText(nameStartX, entryTop, fullLine, {1, 1, 1, 1});
         end
 
@@ -701,7 +733,8 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         --   6. HP value  (overlay on HP bar's right edge)
         --   7. TP        (LAST — top of stack, overlays MP bar's left)
         local mpRowY        = hpStartY + hpBarHeight - LAYOUT_SUPERCOMPACT_OVERLAP;
-        local _, mpRowTextH = imgui.CalcTextSize('A');
+        setTextSize(fontSizes.mp);
+        local _, mpRowTextH = measureText('A');
         local mpBarStartX   = barAreaLeft + hpBarWidth - mpBarWidth;
         local showMpBar     = cache.alwaysShowMpBar or JobHasMP(memInfo.job, memInfo.subjob);
 
@@ -721,14 +754,14 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 mpValStr  = tostring(mpPercent) .. '%';
                 mpSuffStr = '(' .. tostring(memInfo.mp) .. ')';
             end
-            local valW  = imgui.CalcTextSize(mpValStr);
-            local suffW = imgui.CalcTextSize(mpSuffStr);
+            local valW  = measureText(mpValStr);
+            local suffW = measureText(mpSuffStr);
             mpSuffX     = hpStartX + entryWidth - suffW + 6;   -- SC_VALUE_BOTH_OFFSET
             mpValX      = mpSuffX - 2 - valW;
             mpValueLeftX = mpValX;
         else
             mpText = formatBarValueText(memInfo.mp, memInfo.maxmp, mpPercent, mpMode);
-            local mpW = imgui.CalcTextSize(mpText);
+            local mpW = measureText(mpText);
             mpValX = hpStartX + entryWidth - mpW + 2;          -- SC_VALUE_NUM_OFFSET
             mpValueLeftX = mpValX;
         end
@@ -798,15 +831,16 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                     valStr  = tostring(hpPercent) .. '%';
                     suffStr = '(' .. tostring(memInfo.hp) .. ')';
                 end
-                local valW  = imgui.CalcTextSize(valStr);
-                local suffW = imgui.CalcTextSize(suffStr);
+                local valW  = measureText(valStr);
+                local suffW = measureText(suffStr);
                 local suffX = hpStartX + entryWidth - suffW + SC_VALUE_BOTH_OFFSET;
                 local valX  = suffX - 2 - valW;
+                setTextSize(fontSizes.hp);
                 drawOutlinedText(valX,  entryTop, valStr,  hpColor);
                 drawOutlinedText(suffX, entryTop, suffStr, hpColor);
             else
                 local hpText = formatBarValueText(memInfo.hp, memInfo.maxhp, hpPercent, hpMode);
-                local hpW = imgui.CalcTextSize(hpText);
+                local hpW = measureText(hpText);
                 drawOutlinedText(hpStartX + entryWidth - hpW + SC_VALUE_NUM_OFFSET, entryTop, hpText, hpColor);
             end
 
@@ -821,6 +855,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
             if #nameStr > 10 then
                 nameStr = nameStr:sub(1, 8) .. '..';
             end
+            setTextSize(fontSizes.name);
             drawOutlinedText(nameStartX, entryTop, nameStr, hpColor);
         end
 
@@ -833,7 +868,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
         -- at 1000+ AND flashTP is enabled.
         do
             local tpText = tostring(memInfo.tp or 0);
-            local tpW    = imgui.CalcTextSize(tpText);
+            local tpW    = measureText(tpText, fontSizes.tp);
             local tpColor;
             if memInfo.tp >= 1000 and (cache.flashTP or cache.rainbowTP) then
                 tpColor = argbToRgbaTable(computeTpColorARGB(memInfo, cache));
@@ -843,7 +878,7 @@ function display.DrawMemberSuperCompact(memIdx, settings, isLastVisibleMember)
                 tpColor = {1, 1, 1, 1};          -- white at 1000+ without flash
             end
             local tpAnchor = (showMpBar and math.min(mpBarStartX, mpValueLeftX)) or mpBarStartX;
-            drawOutlinedText(tpAnchor - tpW - 2, mpRowY + (mpBarHeight - mpRowTextH) / 2, tpText, tpColor);
+            drawOutlinedText(tpAnchor - tpW - 2, mpRowY + (mpBarHeight - mpRowTextH) / 2, tpText, tpColor, fontSizes.tp);
         end
 
         -- Advance imgui cursor past the entry block so the next member draws below.
@@ -1500,10 +1535,10 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         -- Layout 1: overlay HP text on the bar. Drawn AFTER the bar so it renders on top
         -- (gdifont primitive for HP is hidden in layout 1; see set_visible block below).
         if layout == 1 then
-            local hpW, hpH2 = imgui.CalcTextSize(hpDisplayText);
+            local hpW, hpH2 = measureText(hpDisplayText);
             local hpOvX = hpDrawX + hpBarWidth - hpW - 4;
             local hpOvY = hpStartY + (hpBarHeight - hpH2) / 2;
-            drawOutlinedText(hpOvX, hpOvY, hpDisplayText, {1, 1, 1, 1});
+            drawOutlinedText(hpOvX, hpOvY, hpDisplayText, {1, 1, 1, 1}, fontSizes.hp);
         end
         data.memberText[memIdx].zone:set_visible(false);
     elseif (memInfo.zone == '' or memInfo.zone == nil) then
@@ -1538,8 +1573,8 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         -- CalcTextSize(nil) throws — which inside this window's push/Begin
         -- scope would corrupt the shared imgui state for every addon.
         if zoneName ~= nil and zoneName ~= '' then
-            local zW, zH = imgui.CalcTextSize(zoneName);
-            drawOutlinedText(zoneBarStartX + (zoneBarWidth - zW) / 2, zoneBarStartY + (zoneBarHeight - zH) / 2, zoneName, {1, 1, 1, 1});
+            local zW, zH = measureText(zoneName);
+            drawOutlinedText(zoneBarStartX + (zoneBarWidth - zW) / 2, zoneBarStartY + (zoneBarHeight - zH) / 2, zoneName, {1, 1, 1, 1}, fontSizes.zone);
         end
         data.memberText[memIdx].zone:set_visible(false);
     end
@@ -1570,7 +1605,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
         -- Right alignment (see hp_font_settings), meaning the X it was given
         -- was the RIGHT edge of the text. imgui draws from the left, so the
         -- text width has to be subtracted to land in the same place.
-        local imguiHpW = imgui.CalcTextSize(tostring(hpDisplayText or ''));
+        local imguiHpW = measureText(tostring(hpDisplayText or ''));
         pendingL0.hp = {
             x = hpStartX + hpBarWidth + settings.hpTextOffsetX + textOffsets.hpX - imguiHpW,
             y = hpStartY + hpBarHeight + settings.hpTextOffsetY + textOffsets.hpY,
@@ -1783,7 +1818,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 -- Layout 0: distance sits on the name row, right-aligned to the
                 -- HP bar's right edge. Drawn via imgui like the rest of this
                 -- layout's text so the window background can't cover it.
-                local imguiDistW, imguiDistH = imgui.CalcTextSize(tostring(distanceText or ''));
+                local imguiDistW, imguiDistH = measureText(tostring(distanceText or ''));
                 pendingL0.distance = {
                     x = distancePosX + textOffsets.distanceX - imguiDistW,
                     y = hpStartY - imguiDistH + textOffsets.distanceY,
@@ -1829,7 +1864,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             -- Layout 0: job text sits on the name row, right-aligned to the far
             -- edge of the bars. Measured and drawn with imgui (job text is only
             -- shown in layout 0 -- see the showJob check above).
-            local imguiJobW, imguiJobH = imgui.CalcTextSize(tostring(jobStr or ''));
+            local imguiJobW, imguiJobH = measureText(tostring(jobStr or ''));
             local jobPosX = hpStartX + allBarsLengths - imguiJobW;
             pendingL0.job = {
                 x = jobPosX + textOffsets.jobX,
@@ -1846,8 +1881,8 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
     -- BEFORE the MP/TP/cast bars so that when the member is casting the cast bar
     -- overlaps the distance (draw distance, then castbar on top).
     if pendingLayout1Distance ~= nil then
-        local dW, _ = imgui.CalcTextSize(pendingLayout1Distance.text);
-        drawOutlinedText(pendingLayout1Distance.rightX - dW, pendingLayout1Distance.y, pendingLayout1Distance.text, pendingLayout1Distance.color);
+        local dW, _ = measureText(pendingLayout1Distance.text);
+        drawOutlinedText(pendingLayout1Distance.rightX - dW, pendingLayout1Distance.y, pendingLayout1Distance.text, pendingLayout1Distance.color, fontSizes.distance);
     end
 
     -- MP/TP bars
@@ -1943,8 +1978,8 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     -- Layout 1: overlay spell name centered on cast bar (drawn AFTER bar)
                     if castData and castData.spellName then
                         local sn = castData.spellName;
-                        local snW, snH = imgui.CalcTextSize(sn);
-                        drawOutlinedText(mpStartX + (mpBarWidth - snW) / 2, mpStartY + (mpBarHeight - snH) / 2, sn, {1, 0.8, 0.27, 1});
+                        local snW, snH = measureText(sn);
+                        drawOutlinedText(mpStartX + (mpBarWidth - snW) / 2, mpStartY + (mpBarHeight - snH) / 2, sn, {1, 0.8, 0.27, 1}, fontSizes.mp);
                     end
                     -- Set MP text to spell name with cast text color
                     setCachedText(memIdx, 'mp', data.memberText[memIdx].mp, castData.spellName);
@@ -2011,8 +2046,8 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                     -- to stay on top in the same imgui draw list). TP overlay is rendered
                     -- below the showMpBar block so no-MP jobs still show TP.
                     do
-                        local mpW, mpH2 = imgui.CalcTextSize(mpDisplayText);
-                        drawOutlinedText(mpStartX + mpBarWidth - mpW - 4, mpStartY + (mpBarHeight - mpH2) / 2, mpDisplayText, {1, 1, 1, 1});
+                        local mpW, mpH2 = measureText(mpDisplayText, fontSizes.mp);
+                        drawOutlinedText(mpStartX + mpBarWidth - mpW - 4, mpStartY + (mpBarHeight - mpH2) / 2, mpDisplayText, {1, 1, 1, 1}, fontSizes.mp);
                     end
                     if (data.memberTextColorCache[memIdx].mp ~= cache.colors.mpTextColor) then
                         data.memberText[memIdx].mp:set_font_color(cache.colors.mpTextColor);
@@ -2033,7 +2068,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             -- 1000+ and white below 1000.
             if showTP and memInfo.inzone then
                 local tpStr = tostring(memInfo.tp);
-                local tpW, tpH2 = imgui.CalcTextSize(tpStr);
+                local tpW, tpH2 = measureText(tpStr, fontSizes.tp);
                 local tpColor;
                 if memInfo.tp >= 1000 and (cache.flashTP or cache.rainbowTP) then
                     tpColor = argbToRgbaTable(computeTpColorARGB(memInfo, cache));
@@ -2044,7 +2079,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 end
                 -- TP value sits in the empty gap to the LEFT of the (narrower,
                 -- right-aligned) MP bar, right-aligned against the bar's left edge.
-                drawOutlinedText(mpStartX - tpW - 4, mpStartY + (mpBarHeight - tpH2) / 2, tpStr, tpColor);
+                drawOutlinedText(mpStartX - tpW - 4, mpStartY + (mpBarHeight - tpH2) / 2, tpStr, tpColor, fontSizes.tp);
             end
         else
             -- Layout 0: Horizontal layout
@@ -2139,7 +2174,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 -- imgui applies string methods to its argument.
                 local mpCached = (data.memberTextCache[memIdx] or {}).mp;
                 local mpDrawText = tostring(mpCached or mpDisplayText or '');
-                local imguiMpW = imgui.CalcTextSize(mpDrawText);
+                local imguiMpW = measureText(mpDrawText);
                 pendingL0.mp = {
                     x = mpStartX + mpBarWidth - imguiMpW + textOffsets.mpX,
                     y = mpStartY + mpBarHeight + settings.mpTextOffsetY + textOffsets.mpY,
@@ -2216,7 +2251,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
                 -- cache can legitimately be empty on the first frame and the
                 -- number would silently not draw.
                 local tpDrawText = tostring(tpText or '');
-                local imguiTpW = imgui.CalcTextSize(tpDrawText);
+                local imguiTpW = measureText(tpDrawText);
                 pendingL0.tp = {
                     x = tpStartX + tpBarWidth - imguiTpW + textOffsets.tpX,
                     y = tpStartY + tpBarHeight + settings.tpTextOffsetY + textOffsets.tpY,
@@ -2502,7 +2537,7 @@ function display.DrawMember(memIdx, settings, isLastVisibleMember)
             -- the primitive path used -- imgui positions from the top-left with
             -- no baseline correction, so mixing the two metrics pushed the text
             -- out of the row entirely.
-            local _, imguiNameH = imgui.CalcTextSize(tostring(nameToDraw or ''));
+            local _, imguiNameH = measureText(tostring(nameToDraw or ''));
             nameX = namePosX + textOffsets.nameX;
             nameY = hpStartY - imguiNameH - settings.nameTextOffsetY + textOffsets.nameY;
         end
@@ -2545,6 +2580,20 @@ end
 -- DrawPartyWindow - Render a single party window
 -- ============================================
 function display.DrawPartyWindow(settings, party, partyIndex)
+    -- imtext keeps font family / weight / outline as MODULE-level state, and
+    -- the hotbar sets it from its own settings. Re-apply ours each frame or
+    -- the party list inherits whatever the hotbar last configured.
+    -- SetConfig early-outs when nothing changed, so this is cheap.
+    do
+        local pc = data.partyConfigCache[partyIndex];
+        if pc and pc.overrideFont then
+            -- This party has its own family/weight, independent of Global.
+            imtext.SetConfig(pc.fontFamily, pc.fontWeight == 'Bold', pc.outlineWidth);
+        elseif settings and settings.name_font_settings then
+            imtext.SetConfigFromSettings(settings.name_font_settings);
+        end
+    end
+
     local firstPlayerIndex = (partyIndex - 1) * data.partyMaxSize;
     local lastPlayerIndex = firstPlayerIndex + data.partyMaxSize - 1;
 
@@ -2854,7 +2903,7 @@ function display.DrawPartyWindow(settings, party, partyIndex)
             -- away from the title.
             if previewMode or hasTreasure then
                 local label = 'Treas.';
-                local tw, th = imgui.CalcTextSize(label);
+                local tw, th = measureText(label);
                 local tx = titlePosX - tw - 6;
                 local ty = titlePosY + math.floor((titleHeight - th) / 2);
                 drawOutlinedText(tx, ty, label, GOLD);
@@ -2867,7 +2916,7 @@ function display.DrawPartyWindow(settings, party, partyIndex)
             if previewMode or hasTrade  then rightLabels[#rightLabels + 1] = 'Trade';  end
             if previewMode or hasInvite then rightLabels[#rightLabels + 1] = 'Invite'; end
             if #rightLabels > 0 then
-                local _, lineH = imgui.CalcTextSize('Ag');
+                local _, lineH = measureText('Ag');
                 local blockH = lineH * #rightLabels;
                 local startY = titlePosY + math.floor((titleHeight - blockH) / 2);
                 local rx = titlePosX + titleWidth + 6;
@@ -2949,6 +2998,21 @@ end
 --   LFG (Looking for Group, in party)    -                  bit 0x08
 -- Also draws a yellow Level Sync dot (buff 233) on the top-right corner.
 function display.DrawCurrentTarget(settings)
+    -- This window anchors to party 1, so it follows party 1's text settings --
+    -- size, and the font override if that party has one. Without this it would
+    -- inherit whatever the last thing drawn happened to leave behind.
+    do
+        local fs = data.getFontSizes(1);
+        if fs then setTextSize(fs.name); end
+
+        local pc = data.partyConfigCache[1];
+        if pc and pc.overrideFont then
+            imtext.SetConfig(pc.fontFamily, pc.fontWeight == 'Bold', pc.outlineWidth);
+        elseif settings and settings.name_font_settings then
+            imtext.SetConfigFromSettings(settings.name_font_settings);
+        end
+    end
+
     if not gConfig.showPartyListTarget then
         if data.targetWindowPrim.background then windowBg.hide(data.targetWindowPrim.background); end
         data.invalidateWindowRect('target', true);  -- hard: feature disabled, no layout
@@ -3385,21 +3449,24 @@ function display.DrawCurrentTarget(settings)
         wX, wY = imgui.GetWindowPos();
 
         local function outlined(x, y, col, text)
-            -- Draw on the FOREGROUND list so text composites ON TOP of the HP bar
-            -- (imgui.TextColored landed on the window list UNDER the bar). 4-dir
-            -- black outline + colored fill via AddText.
+            -- Foreground list so text composites ON TOP of the HP bar
+            -- (imgui.TextColored landed on the window list UNDER it).
+            --
+            -- Routed through imtext like the rest of this file so the party
+            -- list's Text Size / font family / outline settings apply here
+            -- too; bare AddText was locked to imgui's default size.
             local dl = imgui.GetForegroundDrawList();
-            local s = tostring(text);
-            local blackU = imgui.GetColorU32({0, 0, 0, 1});
-            local fillU  = imgui.GetColorU32(col);
-            dl:AddText({x - 1, y}, blackU, s);
-            dl:AddText({x + 1, y}, blackU, s);
-            dl:AddText({x, y - 1}, blackU, s);
-            dl:AddText({x, y + 1}, blackU, s);
-            dl:AddText({x, y}, fillU, s);
+            if dl == nil then return; end
+            local c = col or {1, 1, 1, 1};
+            local argb = bit.bor(
+                bit.lshift(math.floor((c[4] or 1) * 255), 24),
+                bit.lshift(math.floor(c[1] * 255), 16),
+                bit.lshift(math.floor(c[2] * 255), 8),
+                math.floor(c[3] * 255));
+            imtext.Draw(dl, tostring(text), x, y, argb, currentTextSize);
         end
 
-        local _, lineH = imgui.CalcTextSize('A');
+        local _, lineH = measureText('A');
         -- Vertical margins of the INVISIBLE (content) box that extend past the
         -- visible panel, so "Target" can straddle the top edge and "Locked" the
         -- bottom edge (retail look) without being clipped.
@@ -3469,7 +3536,7 @@ function display.DrawCurrentTarget(settings)
             -- percent, so a 3-digit "100" sits beside the bar instead of being
             -- drawn on top of it.
             local sideInset = 10;
-            local pctGutter = imgui.CalcTextSize('100') + 10;
+            local pctGutter = measureText('100') + 10;
             barX      = wX + sideInset + pctGutter;
             tbarWidth = winW - (sideInset * 2) - pctGutter;
         elseif barLeft and barRight and barRight > barLeft then
@@ -3528,7 +3595,7 @@ function display.DrawCurrentTarget(settings)
             if hpNameColor then pctColor = hpNameColor; end
         end
         local pctStr  = string.format('%d', math.floor(targetHPP * 100));
-        local pctW, _ = imgui.CalcTextSize(pctStr);
+        local pctW, _ = measureText(pctStr);
         -- Right-aligned against the bar's left edge in every layout. Horizontal
         -- reserves a gutter for this above, so there's room for a 3-digit value.
         outlined(barX - pctW - 6, textY, pctColor, pctStr);
@@ -3544,7 +3611,7 @@ function display.DrawCurrentTarget(settings)
                and distance <= cache.distanceHighlight then
                 distColor = {0.20, 1.00, 1.00, 1.0};   -- in-range cyan
             end
-            local dW, _      = imgui.CalcTextSize(distanceText);
+            local dW, _      = measureText(distanceText);
             local rightInset = 10;
             outlined(wX + winW - dW - rightInset, nameRowY, distColor, distanceText);
         end
@@ -3562,12 +3629,16 @@ function display.DrawCurrentTarget(settings)
         -- Foreground outline helper (for elements that must sit ON TOP of the
         -- selector, which is itself on the foreground list).
         local function outlinedFg(dl, x, y, col, text)
-            local b = imgui.GetColorU32({0,0,0,1});
-            dl:AddText({x-1, y}, b, text);
-            dl:AddText({x+1, y}, b, text);
-            dl:AddText({x, y-1}, b, text);
-            dl:AddText({x, y+1}, b, text);
-            dl:AddText({x, y}, imgui.GetColorU32(col), text);
+            -- Via imtext for the same reason as outlined() above: bare AddText
+            -- ignores the configured text size and font.
+            if dl == nil then return; end
+            local c = col or {1, 1, 1, 1};
+            local argb = bit.bor(
+                bit.lshift(math.floor((c[4] or 1) * 255), 24),
+                bit.lshift(math.floor(c[1] * 255), 16),
+                bit.lshift(math.floor(c[2] * 255), 8),
+                math.floor(c[3] * 255));
+            imtext.Draw(dl, tostring(text), x, y, argb, currentTextSize);
         end
 
         -- Lock-on selector + edge labels, all on the foreground list and in the
@@ -3604,7 +3675,7 @@ function display.DrawCurrentTarget(settings)
         -- "Target" centered on the TOP edge of the box (on top of the selector).
         do
             local titleStr   = 'Target';
-            local titleW, tH = imgui.CalcTextSize(titleStr);
+            local titleW, tH = measureText(titleStr);
             local titleX     = wX + math.floor((winW - titleW) / 2);
             local titleY     = rbY1 - math.floor(tH / 2);
             outlinedFg(fg, titleX, titleY, {0.75, 0.83, 0.90, 1.0}, titleStr);
@@ -3618,7 +3689,7 @@ function display.DrawCurrentTarget(settings)
         -- frame. Drawn on the foreground draw list (fg), which isn't clipped
         -- by the imgui window, so overhanging the top border is safe.
         if statusIconKey ~= nil then
-            local _, titleH    = imgui.CalcTextSize('Target');
+            local _, titleH    = measureText('Target');
             local iconSize     = titleH + 4;       -- a touch bigger than title text
             local rightInset   = 8;                -- gap from the window's right edge
             local iconX        = wX + winW - iconSize - rightInset;
@@ -3635,7 +3706,7 @@ function display.DrawCurrentTarget(settings)
             else
                 -- Texture missing - fall back to the colored 2-3 letter label
                 -- so the indicator still works before icon assets ship.
-                local lblW, lblH = imgui.CalcTextSize(statusIconLabel);
+                local lblW, lblH = measureText(statusIconLabel);
                 local lblX = wX + winW - lblW - rightInset;
                 local lblY = rbY1 - math.floor(lblH / 2);
                 outlinedFg(fg, lblX, lblY, statusIconColor, statusIconLabel);
@@ -3646,7 +3717,7 @@ function display.DrawCurrentTarget(settings)
         -- inward-pointing arrows ►Locked◄ (the second arrow set, on the text).
         if isLocked then
             local lockText      = 'Locked';
-            local lockW, lockTH = imgui.CalcTextSize(lockText);
+            local lockW, lockTH = measureText(lockText);
             local lockX         = wX + math.floor((winW - lockW) / 2);
             local lockY         = rbY2 - math.floor(lockTH / 2);
             local selCol        = imgui.GetColorU32({ 1.0, 0.55, 0.10, 1.0 });
@@ -3771,7 +3842,7 @@ function display.GetCastCostAnchor(settings)
         -- includes the "Target"/"Locked" edge-label overhang on top AND bottom
         -- (edgeOverhang each) plus winPadY padding. Anchoring above the full
         -- height overshoots and leaves a large gap, so trim that overshoot.
-        local _, lineH = imgui.CalcTextSize('A');
+        local _, lineH = measureText('A');
         local edgeOverhang = math.floor(lineH / 2) + 1;
         local winPadY = 6;
         local targetTrim = edgeOverhang + (winPadY * 2);

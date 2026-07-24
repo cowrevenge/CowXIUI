@@ -19,6 +19,11 @@ components.INDENT_SIZE = 20;
 
 -- List of common Windows fonts
 components.available_fonts = {
+    -- 'Default' is imgui's built-in bitmap font, not a family loaded from
+    -- disk. It renders crisply at small sizes where the TTF families go
+    -- blurry, and it is what the UI used before text was routed through
+    -- libs/imtext. Selecting it makes imtext skip font loading entirely.
+    'Default',
     'Arial',
     'Calibri',
     'Consolas',
