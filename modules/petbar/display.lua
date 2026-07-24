@@ -74,11 +74,6 @@ local windowState = {
     height = nil,
 };
 
--- Position saving state
-local hasAppliedSavedPosition = false;
-local lastSavedPosX = nil;
-local lastSavedPosY = nil;
-
 -- ============================================
 -- Per-Pet-Type Settings Helpers
 -- ============================================
@@ -515,7 +510,9 @@ function display.DrawWindow(settings)
             local recastBarWidth = typeSettings.recastFullBarWidth or gConfig.petBarRecastBarWidth or 150;
             local recastBarHeight = typeSettings.recastFullBarHeight or gConfig.petBarRecastBarHeight or 4;
 
+            ApplyWindowPosition('PetBar');
             if imgui.Begin('PetBar', true, windowFlags) then
+                SaveWindowPosition('PetBar');
                 data.HideBackground();
                 local px, py = imgui.GetCursorScreenPos();
                 local recastLeft = data.GetSummonRecast(summon.timerId);
@@ -627,13 +624,8 @@ function display.DrawWindow(settings)
         windowFlags = bit.band(windowFlags, bit.bnot(ImGuiWindowFlags_NoBackground));
     end
 
-    -- Apply saved position on first render
-    if not hasAppliedSavedPosition and gConfig.petBarWindowPosX ~= nil and gConfig.petBarWindowPosY ~= nil then
-        imgui.SetNextWindowPos({gConfig.petBarWindowPosX, gConfig.petBarWindowPosY}, ImGuiCond_Once);
-        hasAppliedSavedPosition = true;
-        lastSavedPosX = gConfig.petBarWindowPosX;
-        lastSavedPosY = gConfig.petBarWindowPosY;
-    end
+    -- Position is applied by ApplyWindowPosition('PetBar') just before Begin(),
+    -- reading from gConfig.windowPositions like every other XIUI window.
 
     -- Calculate dimensions (base values)
     local barWidth = settings.barWidth;
@@ -684,7 +676,9 @@ function display.DrawWindow(settings)
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 4);
     imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
 
+    ApplyWindowPosition('PetBar');
     if imgui.Begin('PetBar', true, windowFlags) then
+        SaveWindowPosition('PetBar');
         windowPosX, windowPosY = imgui.GetWindowPos();
         local startX, startY = imgui.GetCursorScreenPos();
 
@@ -1185,24 +1179,9 @@ function display.DrawWindow(settings)
             fg:AddLine({ windowPosX + 3, windowPosY + windowHeight - 1 }, { windowPosX + windowWidth - 3, windowPosY + windowHeight - 1 }, silver, 1.0);
         end
 
-        -- Save position when user moves window (check on mouse release)
-        local canMove = not gConfig.lockPositions or (showConfig[1] and gConfig.petBarPreview);
-        if canMove then
-            -- Only save if position changed significantly (avoid floating point noise)
-            local posChanged = (lastSavedPosX == nil or lastSavedPosY == nil) or
-                               (math.abs(windowPosX - lastSavedPosX) > 1) or
-                               (math.abs(windowPosY - lastSavedPosY) > 1);
-            if posChanged and not imgui.IsMouseDown(0) then
-                -- Mouse released and position changed - save to settings
-                gConfig.petBarWindowPosX = windowPosX;
-                gConfig.petBarWindowPosY = windowPosY;
-                lastSavedPosX = windowPosX;
-                lastSavedPosY = windowPosY;
-                if SaveSettingsToDisk then
-                    SaveSettingsToDisk();
-                end
-            end
-        end
+        -- Position saving is handled by SaveWindowPosition('PetBar') right
+        -- after Begin(), which writes to gConfig.windowPositions along with
+        -- every other XIUI window.
     end
     imgui.End();
 
@@ -1223,7 +1202,9 @@ function display.DrawWindow(settings)
         -- captured before imgui.End() above). FirstUseEver lets the user
         -- drag the popup elsewhere afterwards.
         imgui.SetNextWindowPos({ windowPosX, windowPosY + petBarH + 2 }, ImGuiCond_FirstUseEver);
+        ApplyWindowPosition('NQ Jug Caps');
         if imgui.Begin('NQ Jug Caps', data.jugListOpen, listFlags) then
+            SaveWindowPosition('NQ Jug Caps');
             for _, pet in ipairs(data.jugPets) do
                 if pet.maxLevel < 75 then
                     imgui.Text(string.format('  %-18s %d', pet.name, pet.maxLevel));

@@ -563,6 +563,8 @@ mobinfo.DrawWindow = function(settings)
         imgui.SetNextWindowPos({targetbar.nameTextInfo.x, snapY}, ImGuiCond_Always);
         -- Remove window padding to align precisely with target name
         imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+    else
+        ApplyWindowPosition('MobInfo');
     end
 
     local windowFlags = bit.bor(
@@ -583,6 +585,9 @@ mobinfo.DrawWindow = function(settings)
     HideAllFonts();
 
     if imgui.Begin('MobInfo', true, windowFlags) then
+        if not snapToTargetBar then
+            SaveWindowPosition('MobInfo');
+        end
         -- If no data, show a simple message
         if mobInfo == nil then
             fonts.header:set_text('No mob data');

@@ -115,7 +115,9 @@ local function DrawSingleContainerWindow(windowName, usedSlots, maxSlots, settin
 
     local fontVisible = false;
 
+    ApplyWindowPosition(windowName);
     if (imgui.Begin(windowName, true, windowFlags)) then
+        SaveWindowPosition(windowName);
         local locX, locY = imgui.GetWindowPos();
         local style = imgui.GetStyle();
         local framePaddingX = style.FramePadding.x;

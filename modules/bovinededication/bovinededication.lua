@@ -440,7 +440,11 @@ function M.DrawWindow(settings)
     -- false -- we flip the shared config so the window stays hidden even
     -- while the buff is still active.
     local win_open = { true };
+    ApplyWindowPosition('Dedication##bovinededication');
     local drew = imgui.Begin('Dedication##bovinededication', win_open, ImGuiWindowFlags_NoCollapse);
+    if drew then
+        SaveWindowPosition('Dedication##bovinededication');
+    end
     if not win_open[1] and cfg then
         cfg.bovinededicationHidden = true;
     end

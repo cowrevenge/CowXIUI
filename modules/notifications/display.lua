@@ -685,8 +685,9 @@ local function drawNotificationWindow(windowName, notifications, settings, split
     end
 
     -- Create ImGui window
+    ApplyWindowPosition(windowName);
     if imgui.Begin(windowName, true, windowFlags) then
-        -- Wrap rendering in pcall to ensure End() is always called even if an error occurs
+        SaveWindowPosition(windowName);
         local renderSuccess, renderErr = pcall(function()
             local windowPosX, windowPosY = imgui.GetWindowPos();
             local drawList = imgui.GetWindowDrawList();
@@ -1306,10 +1307,15 @@ local function drawGroupWindow(groupNum, settings)
             local newY = anchor.y - totalHeight;
             imgui.SetNextWindowPos({anchor.x or 0, newY});
         end
+    else
+        ApplyWindowPosition(windowName);
     end
 
     -- Create ImGui window
     if imgui.Begin(windowName, true, windowFlags) then
+        if not stackUp then
+            SaveWindowPosition(windowName);
+        end
         local renderSuccess, renderErr = pcall(function()
             local windowPosX, windowPosY = imgui.GetWindowPos();
             local drawList = imgui.GetWindowDrawList();

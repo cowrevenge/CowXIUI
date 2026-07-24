@@ -51,11 +51,6 @@ local windowState = {
     height = nil,
 };
 
--- Position saving state
-local hasAppliedSavedPosition = false;
-local lastSavedPosX = nil;
-local lastSavedPosY = nil;
-
 -- ============================================
 -- Initialization
 -- ============================================
@@ -417,12 +412,8 @@ function M.Render(itemInfo, itemType, settings, colors)
     if anchor then
         local h = (mD and mD.windowH) or (windowState and windowState.height) or 100;
         imgui.SetNextWindowPos({anchor.x, anchor.y - h}, ImGuiCond_Always);
-    elseif not hasAppliedSavedPosition and cc.windowPosX ~= nil and cc.windowPosY ~= nil then
-        -- Apply saved position on first render (existing behaviour).
-        imgui.SetNextWindowPos({cc.windowPosX, cc.windowPosY}, ImGuiCond_Once);
-        hasAppliedSavedPosition = true;
-        lastSavedPosX = cc.windowPosX;
-        lastSavedPosY = cc.windowPosY;
+    else
+        ApplyWindowPosition('CastCost');
     end
 
     -- Window size: exact size so the clip rect is correct from frame 1.
@@ -446,6 +437,9 @@ function M.Render(itemInfo, itemType, settings, colors)
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 4);
 
     if imgui.Begin('CastCost', true, windowFlags) then
+        if not anchor then
+            SaveWindowPosition('CastCost');
+        end
         local cursorX, cursorY = imgui.GetCursorScreenPos();
 
             -- ====================================================
@@ -537,27 +531,9 @@ function M.Render(itemInfo, itemType, settings, colors)
             windowState.height = totalHeight;
         end
 
-        -- Save position when user moves window (check on mouse release).
-        -- Skipped while anchored — the anchor owns the position.
-        if not anchor and not gConfig.lockPositions then
-            local winPosX, winPosY = imgui.GetWindowPos();
-            -- Only save if position changed significantly (avoid floating point noise)
-            local posChanged = (lastSavedPosX == nil or lastSavedPosY == nil) or
-                               (math.abs(winPosX - lastSavedPosX) > 1) or
-                               (math.abs(winPosY - lastSavedPosY) > 1);
-            if posChanged and not imgui.IsMouseDown(0) then
-                -- Mouse released and position changed - save to settings
-                local cc = gConfig.castCost or {};
-                cc.windowPosX = winPosX;
-                cc.windowPosY = winPosY;
-                gConfig.castCost = cc;
-                lastSavedPosX = winPosX;
-                lastSavedPosY = winPosY;
-                if SaveSettingsToDisk then
-                    SaveSettingsToDisk();
-                end
-            end
-        end
+        -- Position saving is handled by SaveWindowPosition('CastCost') right
+        -- after Begin(), which writes to gConfig.windowPositions along with
+        -- every other XIUI window.
     end
     -- Capture final castcost rect just before End, while the window is still
     -- the topmost imgui context. Published to the partylist anchor registry

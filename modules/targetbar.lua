@@ -277,8 +277,9 @@ targetbar.DrawWindow = function(settings)
 
 	-- Draw the main target window
 	local windowFlags = GetBaseWindowFlags(gConfig.lockPositions);
+	ApplyWindowPosition('TargetBar');
     if (imgui.Begin('TargetBar', true, windowFlags)) then
-        
+		SaveWindowPosition('TargetBar');
 		-- Obtain and prepare target information..
 		local dist  = ('%.1f'):fmt(math.sqrt(targetEntity.Distance));
 		local targetNameText = targetEntity.Name;
@@ -746,7 +747,9 @@ targetbar.DrawWindow = function(settings)
 			if (subtargetEntity ~= nil and subtargetEntity.Name ~= nil) then
 				local subtargetWindowFlags = GetBaseWindowFlags(gConfig.lockPositions);
 
+				ApplyWindowPosition('SubtargetBar');
 				if (imgui.Begin('SubtargetBar', true, subtargetWindowFlags)) then
+					SaveWindowPosition('SubtargetBar');
 					-- Reserve space above bar for text
 					local topReserveHeight = settings.topTextYOffset + settings.subtargetName_font_settings.font_height;
 					imgui.Dummy({0, topReserveHeight});
@@ -902,7 +905,9 @@ targetbar.DrawWindow = function(settings)
 		if (totEntity ~= nil and totEntity.Name ~= nil) then
 			local windowFlags = GetBaseWindowFlags(gConfig.lockPositions);
 
+			ApplyWindowPosition('TargetOfTargetBar');
 			if (imgui.Begin('TargetOfTargetBar', true, windowFlags)) then
+				SaveWindowPosition('TargetOfTargetBar');
 				local totColor = GetColorOfTarget(totEntity, totIndex);
 				local totStartX, totStartY = imgui.GetCursorScreenPos();
 

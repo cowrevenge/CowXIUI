@@ -358,7 +358,9 @@ function M.DrawWindow(settings)
 
     imgui.SetNextWindowSize({-1, -1}, ImGuiCond_Always);
 
+    ApplyWindowPosition('TreasurePool');
     if imgui.Begin('TreasurePool', true, windowFlags) then
+        SaveWindowPosition('TreasurePool');
         local startX, startY = imgui.GetCursorScreenPos();
         local drawList = imgui.GetBackgroundDrawList();
 

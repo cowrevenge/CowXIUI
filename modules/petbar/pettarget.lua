@@ -200,7 +200,9 @@ function pettarget.DrawWindow(settings)
     imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 4);
     imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
 
+    ApplyWindowPosition('PetBarTarget');
     if imgui.Begin('PetBarTarget', true, windowFlags) then
+        SaveWindowPosition('PetBarTarget');
         local targetWinPosX, targetWinPosY = imgui.GetWindowPos();
         local targetStartX, targetStartY = imgui.GetCursorScreenPos();
 

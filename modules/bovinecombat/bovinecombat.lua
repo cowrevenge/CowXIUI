@@ -617,10 +617,14 @@ function M.DrawWindow(settings)
         end
     end
 
+    ApplyWindowPosition('Combat Timers##bovinecombat');
     local drew = imgui.Begin('Combat Timers##bovinecombat', win_open,
         bit.bor(ImGuiWindowFlags_NoCollapse,
                 ImGuiWindowFlags_AlwaysAutoResize,
                 ImGuiWindowFlags_NoResize));
+    if drew then
+        SaveWindowPosition('Combat Timers##bovinecombat');
+    end
     if not win_open[1] and cfg then
         cfg.bovinecombatHidden = true;
     end

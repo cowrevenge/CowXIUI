@@ -470,6 +470,9 @@ end);
 ashita.events.register('d3d_present', 'present_cb', function ()
     if not bInitialized then return; end
 
+    -- Persist any window positions that have settled since the last frame.
+    if FlushWindowPositions then FlushWindowPositions(); end
+
     -- Process deferred hotbar icon-cache clears scheduled by macro CRUD last
     -- frame. Runs before any rendering this frame so stale caches don't produce
     -- wrong icons. Guarded: only fires when the hotbar module is present.
@@ -635,6 +638,14 @@ ashita.events.register('load', 'load_cb', function ()
     if imtext and imtext.PrewarmFonts then
         pcall(imtext.PrewarmFonts, components.available_fonts);
     end
+
+    -- Drop any non-XIUI or transient entries a previous unfiltered pass left
+    -- behind, then backfill window positions from imgui.ini for anything
+    -- gConfig does not know about yet. Runs before InitializeAll so every
+    -- module has a position available on its first frame, whether or not it
+    -- has ever rendered since the position system went in.
+    if PruneWindowPositions then pcall(PruneWindowPositions); end
+    if SeedWindowPositions then pcall(SeedWindowPositions); end
 
     uiModules.InitializeAll(gAdjustedSettings);
 

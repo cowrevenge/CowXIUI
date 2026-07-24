@@ -2714,9 +2714,14 @@ function display.DrawPartyWindow(settings, party, partyIndex)
     -- Push the anchored position now that all StyleVars are set up.
     if anchoredPos ~= nil then
         imgui.SetNextWindowPos(anchoredPos, ImGuiCond_Always);
+    else
+        ApplyWindowPosition(windowName);
     end
 
     if (imgui.Begin(windowName, true, windowFlags)) then
+        if anchoredPos == nil then
+            SaveWindowPosition(windowName);
+        end
         imguiPosX, imguiPosY = imgui.GetWindowPos();
         -- Capture Party 1's screen position so anchored sub-windows
         -- (Target Bar / Cast Cost) can be placed above it.

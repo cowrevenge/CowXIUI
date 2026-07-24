@@ -26,7 +26,7 @@ local treasurepoolModule = require('config.treasurepool');
 local bovinelatentModule = require('config.bovinelatent');
 local bovinededicationModule = require('config.bovinededication');
 local bovinecombatModule = require('config.bovinecombat');
-local presetModule = require('config.preset');
+local presetModule = require('modules.presets.presets');
 local hidepartyModule = require('config.hideparty');
 local hotbarModule = require('config.hotbar');
 

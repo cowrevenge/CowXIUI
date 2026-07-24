@@ -779,7 +779,11 @@ function M.DrawWindow(settings)
     -- gConfig so the window stays hidden until they turn it back on from
     -- the config menu.
     local win_open = { true };
+    ApplyWindowPosition('Latent Trial##bovinelatent');
     local drew = imgui.Begin('Latent Trial##bovinelatent', win_open, ImGuiWindowFlags_NoCollapse);
+    if drew then
+        SaveWindowPosition('Latent Trial##bovinelatent');
+    end
     if not win_open[1] and cfg then
         cfg.bovinelatentHidden = true;
     end
