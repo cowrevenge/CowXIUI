@@ -140,6 +140,11 @@ local function is_resting()
     return ent ~= nil and ent.Status == ENTITY_STATUS_RESTING;
 end
 
+-- Forward declaration. Defined further down with the rest-cycle logic, but
+-- HandlePacket (above that point) calls it, and a plain local would resolve to
+-- nil at call time.
+local sync_rest_edges;
+
 -- Packet-driven tick detection.
 --
 -- Polling every frame can only see a tick on the next frame after it lands,
@@ -174,10 +179,15 @@ end
 
 function M.HandlePacket(e)
     if e == nil or e.id ~= 0x0DF then return; end
-    if not is_resting() then
-        -- Drop the baselines: HP/MP will move freely outside resting, and a
-        -- stale pair would make the first packet of the next rest look like a
-        -- huge gain.
+
+    -- Same edge detection as the display paths. A packet can arrive before any
+    -- draw call has run this frame, and without this the plausibility gate
+    -- below would measure against the PREVIOUS rest's rest_start_ts.
+    if not sync_rest_edges() then
+        -- Not resting. Baselines are dropped by sync_rest_edges on the falling
+        -- edge; clear them here too so a packet outside resting never leaves a
+        -- stale pair that makes the next rest's first packet look like a huge
+        -- gain.
         last_hp = nil;
         last_mp = nil;
         return;
@@ -292,6 +302,43 @@ function M.HandlePacket(e)
     tick_seen_ts = t;
 end
 
+-- Rising/falling edge tracking for the rest cycle.
+--
+-- Split out of update_rest_state because GetRestTickProgress (the player-bar
+-- shimmer) reads the same state and may be the ONLY caller in a given frame --
+-- the Combat Timers window can be hidden, or the module disabled entirely,
+-- while the shimmer still runs. When the reset lived only in the countdown
+-- path, standing up and resting again left `synced` true and `tick_seen_ts`
+-- holding the previous rest's timestamp, so the shimmer resumed mid-sweep
+-- instead of starting from 0.
+--
+-- Idempotent: safe to call any number of times per frame. Only the first call
+-- after a resting-state change does anything.
+--
+-- Declared local near the top of the file; this is the assignment.
+function sync_rest_edges()
+    if not is_resting() then
+        if was_resting then
+            was_resting = false;
+            synced      = false;
+            last_hp     = nil;
+            last_mp     = nil;
+        end
+        return false;
+    end
+
+    if not was_resting then
+        rest_start_ts = now_sec();
+        was_resting   = true;
+        synced        = false;
+        anchor_ts     = 0.0;
+        tick_seen_ts  = 0.0;
+        last_hp       = nil;
+        last_mp       = nil;
+    end
+    return true;
+end
+
 -- Track resting and return seconds until the next HP/MP tick (nil when not
 -- resting). Called once per frame from DrawWindow.
 --
@@ -306,25 +353,9 @@ end
 -- Detection still snaps the DISPLAY so the readout visibly restarts when MP
 -- lands, but it never moves the underlying schedule.
 local function update_rest_state()
-    if not is_resting() then
-        was_resting = false;
-        synced      = false;
-        last_hp     = nil;
-        last_mp     = nil;
-        return nil;
-    end
+    if not sync_rest_edges() then return nil; end
 
     local t = now_sec();
-    if not was_resting then
-        rest_start_ts = t;
-        was_resting   = true;
-        synced        = false;
-        anchor_ts     = 0.0;
-        tick_seen_ts  = 0.0;
-
-        -- Choose which stat to watch, once, at the start of this rest. Both
-        -- are sampled so the baseline is correct whichever gets picked.
-    end
 
     -- Tick detection lives entirely in M.HandlePacket (0x0DF). There is no
     -- polling fallback: the server sends that packet on every HP/MP change, so
@@ -380,7 +411,12 @@ end
 -- Exposed so the player-bar shimmer sweeps in lockstep with this countdown
 -- instead of keeping a second, unsynced copy of the timing.
 function M.GetRestTickProgress()
-    if not is_resting() then return nil; end
+    -- Runs the same edge detection as the countdown. This function is often
+    -- the only one called in a frame (Combat Timers window hidden, or the
+    -- module disabled while the player-bar shimmer still draws), so it cannot
+    -- rely on update_rest_state having reset the cycle on the rising edge.
+    if not sync_rest_edges() then return nil; end
+
     local t = now_sec();
 
     if synced then
